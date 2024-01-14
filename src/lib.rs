@@ -13,11 +13,35 @@ use particle::{Charge, Particle};
 use rayon::prelude::*;
 
 #[derive(Clone, Debug)]
-pub enum Execution {
+enum Execution {
     SingleThreaded,
     MultiThreaded,
 }
 
+/// Central struct of this library.
+///
+/// Use this to initialize and start an N-body simulation.
+///
+/// # Example
+/// ```rust
+/// # use nalgebra::Vector3;
+/// # use barnes_hut::{BarnesHut, gravity::{GravitationalAcceleration, GravitationalParticle}};
+/// let particles: Vec<_> = (0..10_000).map(|_| {
+///         GravitationalParticle::new(
+///             1e6,
+///             1000. * Vector3::new_random(),
+///             Vector3::zeros(),
+///         )
+///     }).collect();
+/// let acceleration = GravitationalAcceleration::new(1e-4);
+///
+/// let mut bh = BarnesHut::new(particles, acceleration).multithreaded();
+/// bh.simulate(
+///     0.1,
+///     100,
+///     1.5
+/// );
+/// ```
 #[derive(Debug)]
 pub struct BarnesHut<C, A, P, Q>
 where
@@ -48,12 +72,22 @@ where
         }
     }
 
+    /// Use multiple threads to calculate the forces.
     #[cfg(feature = "rayon")]
-    pub fn multi_threaded(mut self) -> Self {
+    pub fn multithreaded(mut self) -> Self {
         self.execution = Execution::MultiThreaded;
         self
     }
 
+    /// Run the N-body simulation.
+    ///
+    /// This uses the Barnes-Hut algorithm to calculate the forces on each particle,
+    /// and then uses Leapfrog integration to advance the positions.
+    ///
+    /// # Arguments
+    /// - `time_step`: Size of each time step.
+    /// - `num_steps`: How many time steps to take.
+    /// - `theta`: Theta parameter of the Barnes-Hut algorithm.
     pub fn simulate(
         &mut self,
         time_step: f64,

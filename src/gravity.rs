@@ -149,7 +149,7 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         let acceleration = GravitationalAcceleration::new(1e-4);
-        let particles: Vec<GravitationalParticle> = (0..1000)
+        let particles: Vec<GravitationalParticle> = (0..100_000)
             .map(|_| {
                 GravitationalParticle::new(
                     rng.gen_range(0.0..1000.0),
@@ -160,6 +160,6 @@ mod tests {
             .collect();
         let mut bh = BarnesHut::new(particles, acceleration);
 
-        bh.simulate(1., 100, 1.5);
+        bh.simulate(1., 10, 1.5);
     }
 }
