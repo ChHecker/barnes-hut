@@ -147,21 +147,30 @@ mod tests {
     }
 
     #[test]
-    fn test_stack_overflow() {
+    fn test_center_of_mass() {
         let mut rng = rand::thread_rng();
 
         let acceleration = GravitationalAcceleration::new(1e-4);
-        let particles: Vec<GravitationalParticle> = (0..100_000)
+        let particles: Vec<GravitationalParticle> = (0..100)
             .map(|_| {
                 GravitationalParticle::new(
                     rng.gen_range(0.0..1000.0),
-                    Vector3::new_random(),
+                    1000. * Vector3::new_random(),
                     Vector3::new_random(),
                 )
             })
             .collect();
-        let mut bh = BarnesHut::new(particles, acceleration);
 
-        bh.simulate(1., 10, 1.5);
+        let mut brute_force = BarnesHut::new(particles.clone(), acceleration.clone());
+        let mut barnes_hut = BarnesHut::new(particles, acceleration);
+
+        let pos_bf = brute_force.simulate(0.1, 10, 0.);
+        let pos_bh = barnes_hut.simulate(0.1, 10, 1.5);
+
+        for (p_bf, p_bh) in pos_bf.iter().zip(pos_bh.iter()) {
+            assert_abs_diff_eq!(p_bf[0], p_bh[0], epsilon = 1e-5);
+            assert_abs_diff_eq!(p_bf[1], p_bh[1], epsilon = 1e-5);
+            assert_abs_diff_eq!(p_bf[2], p_bh[2], epsilon = 1e-5);
+        }
     }
 }

@@ -77,7 +77,7 @@ impl Particle<f64> for CoulombParticle {
         (
             mass_acc + mass,
             charge_acc + charge,
-            (mass_acc * position_acc + mass * *position) / (mass_acc + mass),
+            (charge_acc * position_acc + *charge * *position) / (charge_acc + charge),
         )
     }
 }
@@ -108,6 +108,7 @@ impl Acceleration<f64> for CoulombAcceleration {
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
+    use rand::Rng;
 
     use crate::BarnesHut;
 
@@ -145,6 +146,36 @@ mod tests {
         for p in last {
             assert_abs_diff_eq!(p[1], 0., epsilon = 1e-8);
             assert_abs_diff_eq!(p[2], 0., epsilon = 1e-8);
+        }
+    }
+
+    #[test]
+    fn test_center_of_charge() {
+        let mut rng = rand::thread_rng();
+
+        let acceleration = CoulombAcceleration::new(1e-4);
+        let particles: Vec<CoulombParticle> = (0..100)
+            .map(|_| {
+                CoulombParticle::new(
+                    rng.gen_range(0.0..1000.0),
+                    rng.gen_range(0.0..0.01),
+                    1000. * Vector3::new_random(),
+                    Vector3::new_random(),
+                )
+            })
+            .collect();
+
+        let mut brute_force = BarnesHut::new(particles.clone(), acceleration.clone());
+        let mut barnes_hut = BarnesHut::new(particles, acceleration);
+
+        let pos_bf = brute_force.simulate(0.1, 10, 0.);
+        let pos_bh = barnes_hut.simulate(0.1, 10, 1.5);
+
+        let epsilon = 1.;
+        for (p_bf, p_bh) in pos_bf.iter().zip(pos_bh.iter()) {
+            assert_abs_diff_eq!(p_bf[0], p_bh[0], epsilon = epsilon);
+            assert_abs_diff_eq!(p_bf[1], p_bh[1], epsilon = epsilon);
+            assert_abs_diff_eq!(p_bf[2], p_bh[2], epsilon = epsilon);
         }
     }
 }
