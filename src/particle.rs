@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use nalgebra::Vector3;
+use nalgebra::{SVector, Vector3};
 
 use crate::octree::PointCharge;
 
@@ -11,6 +11,12 @@ pub trait Charge: Clone + Debug + Send + Sync {
 impl Charge for f64 {
     fn identity() -> Self {
         0.
+    }
+}
+
+impl<const D: usize> Charge for SVector<f64, D> {
+    fn identity() -> Self {
+        SVector::zeros()
     }
 }
 
