@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 
 use crate::octree::Octree;
 use acceleration::Acceleration;
-use nalgebra::Vector3;
+use nalgebra::{DMatrix, Vector3};
 use particle::{Charge, Particle};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -16,6 +16,7 @@ use rayon::prelude::*;
 #[derive(Clone, Debug)]
 enum Execution {
     SingleThreaded,
+    #[cfg(feature = "rayon")]
     MultiThreaded,
 }
 
@@ -27,16 +28,16 @@ enum Execution {
 /// ```rust
 /// # use nalgebra::Vector3;
 /// # use barnes_hut::{BarnesHut, gravity::{GravitationalAcceleration, GravitationalParticle}};
-/// let particles: Vec<_> = (0..10_000).map(|_| {
+/// let particles: Vec<_> = (0..1_000).map(|_| {
 ///         GravitationalParticle::new(
 ///             1e6,
 ///             1000. * Vector3::new_random(),
-///             Vector3::zeros(),
+///             Vector3::new_random(),
 ///         )
 ///     }).collect();
 /// let acceleration = GravitationalAcceleration::new(1e-4);
 ///
-/// let mut bh = BarnesHut::new(particles, acceleration).multithreaded();
+/// let mut bh = BarnesHut::new(particles, acceleration);
 /// bh.simulate(
 ///     0.1,
 ///     100,
@@ -74,6 +75,27 @@ where
     }
 
     /// Use multiple threads to calculate the forces.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use nalgebra::Vector3;
+    /// # use barnes_hut::{BarnesHut, gravity::{GravitationalAcceleration, GravitationalParticle}};
+    /// let particles: Vec<_> = (0..1_000).map(|_| {
+    ///         GravitationalParticle::new(
+    ///             1e6,
+    ///             1000. * Vector3::new_random(),
+    ///             Vector3::new_random(),
+    ///         )
+    ///     }).collect();
+    /// let acceleration = GravitationalAcceleration::new(1e-4);
+    ///
+    /// let mut bh = BarnesHut::new(particles, acceleration).multithreaded();
+    /// bh.simulate(
+    ///     0.1,
+    ///     100,
+    ///     1.5
+    /// );
+    /// ```
     #[cfg(feature = "rayon")]
     pub fn multithreaded(mut self) -> Self {
         self.execution = Execution::MultiThreaded;
@@ -94,16 +116,13 @@ where
         time_step: f64,
         num_steps: usize,
         theta: f64,
-    ) -> Vec<Vec<Vector3<f64>>> {
+    ) -> DMatrix<Vector3<f64>> {
         let n = self.particles.as_ref().len();
 
-        let mut positions = vec![vec![Vector3::zeros(); n]; num_steps + 1];
-        positions[0] = self
-            .particles
-            .as_ref()
-            .iter()
-            .map(|p| p.point_charge().position)
-            .collect();
+        let mut positions: DMatrix<Vector3<f64>> = DMatrix::zeros(num_steps + 1, n);
+        for (i, pos) in positions.row_mut(0).iter_mut().enumerate() {
+            *pos = *self.particles.as_ref()[i].position();
+        }
 
         let mut acceleration = vec![Vector3::zeros(); n];
 
@@ -117,13 +136,11 @@ where
                         *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
                     })
                 }
+                #[cfg(feature = "rayon")]
                 Execution::MultiThreaded => {
-                    #[cfg(feature = "rayon")]
                     acceleration.par_iter_mut().enumerate().for_each(|(i, a)| {
                         *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
                     });
-                    #[cfg(not(feature = "rayon"))]
-                    unreachable!("activated multithreading without rayon");
                 }
             }
 
@@ -136,7 +153,7 @@ where
                 .particles
                 .as_mut()
                 .iter_mut()
-                .zip(positions[t + 1].iter_mut())
+                .zip(positions.row_mut(t + 1).iter_mut())
                 .zip(acceleration.iter_mut())
             {
                 // in first time step, need to get from v_0 to v_(1/2)

@@ -126,21 +126,22 @@ mod tests {
     fn test_symmetry() {
         let acc = GravitationalAcceleration::new(1e-4);
         let particles = vec![
-            GravitationalParticle::new(1e10, Vector3::new(1., 0., 0.), Vector3::zeros()),
-            GravitationalParticle::new(1e10, Vector3::new(-1., 0., 0.), Vector3::zeros()),
+            GravitationalParticle::new(1e6, Vector3::new(1., 0., 0.), Vector3::zeros()),
+            GravitationalParticle::new(1e6, Vector3::new(-1., 0., 0.), Vector3::zeros()),
         ];
         let mut bh = BarnesHut::new(particles, acc);
 
-        let positions = bh.simulate(1., 1, 1.5);
+        let num_steps = 5;
+        let positions = bh.simulate(1., num_steps, 1.5);
 
-        let first = &positions[1];
+        let first = &positions.row(1);
         assert!(first[0][0] < 1.);
         assert!(first[1][0] > -1.);
 
-        let last = positions.last().unwrap();
+        let last = positions.row(num_steps);
         assert_abs_diff_eq!(last[0][0], -last[1][0], epsilon = 1e-8);
 
-        for p in last {
+        for p in &last {
             assert_abs_diff_eq!(p[1], 0., epsilon = 1e-8);
             assert_abs_diff_eq!(p[2], 0., epsilon = 1e-8);
         }

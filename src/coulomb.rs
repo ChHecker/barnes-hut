@@ -134,16 +134,19 @@ mod tests {
         ];
         let mut bh = BarnesHut::new(particles, acc);
 
-        let positions = bh.simulate(1., 1, 1.5);
+        let num_steps = 5;
+        let positions = bh.simulate(1., num_steps, 1.5);
 
-        let first = &positions[1];
+        dbg!(positions.shape());
+
+        let first = &positions.row(1);
         assert!(first[0][0] > 1.);
         assert!(first[1][0] < -1.);
 
-        let last = positions.last().unwrap();
+        let last = positions.row(num_steps);
         assert_abs_diff_eq!(last[0][0], -last[1][0], epsilon = 1e-8);
 
-        for p in last {
+        for p in &last {
             assert_abs_diff_eq!(p[1], 0., epsilon = 1e-8);
             assert_abs_diff_eq!(p[2], 0., epsilon = 1e-8);
         }
@@ -158,7 +161,7 @@ mod tests {
             .map(|_| {
                 CoulombParticle::new(
                     rng.gen_range(0.0..1000.0),
-                    rng.gen_range(0.0..0.01),
+                    rng.gen_range(0.0..0.0001),
                     1000. * Vector3::new_random(),
                     Vector3::new_random(),
                 )
