@@ -20,7 +20,7 @@ macro_rules! unreachable_debug {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Octree<'a, C, A, P>
+pub struct Octree<'a, C, A, P>
 where
     C: Charge,
     A: Acceleration<C>,
@@ -32,7 +32,7 @@ where
 }
 
 impl<'a, C: Charge, A: Acceleration<C>, P: Particle<C>> Octree<'a, C, A, P> {
-    pub(super) fn new(particles: &'a [P], theta: f64, acceleration: &'a A) -> Self {
+    pub fn new(particles: &'a [P], theta: f64, acceleration: &'a A) -> Self {
         Self {
             root: Node::from_particles(particles),
             theta,
@@ -40,7 +40,7 @@ impl<'a, C: Charge, A: Acceleration<C>, P: Particle<C>> Octree<'a, C, A, P> {
         }
     }
 
-    pub(super) fn calculate_acceleration(&self, particle: &P) -> Vector3<f64> {
+    pub fn calculate_acceleration(&self, particle: &P) -> Vector3<f64> {
         self.root.calculate_acceleration(
             particle,
             &|p1, p2| self.acceleration.eval(p1, p2),

@@ -6,19 +6,25 @@ license = "MIT"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+visualization = ["blue_engine"]
+
 [dependencies]
-nalgebra = "0.32.3"
+blue_engine = { version = "0.5.0", optional = true }
+nalgebra = { version = "0.32.3", features = ["rand"] }
+rand = "0.8.5"
 rayon = { version = "1.8.0", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
 criterion = "0.5.1"
-nalgebra = { version = "0.32.3", features = ["rand"] }
-rand = "0.8.5"
 
-[profile.profiling]
-inherits = "release"
-debug = true
+[profile.dev]
+opt-level = 3
+
+[[bin]]
+name = "visualizer"
+required-features = ["visualization"]
 
 [[example]]
 name = "gravity"
