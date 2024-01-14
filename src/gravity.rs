@@ -112,7 +112,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gravity() {
+    fn test_acceleration() {
         let par1 = GravitationalParticle::new(1., Vector3::new(1., 0., 0.), Vector3::zeros());
         let par2 = GravitationalParticle::new(1., Vector3::new(-1., 0., 0.), Vector3::zeros());
 
@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn test_barnes_hut() {
+    fn test_symmetry() {
         let acc = GravitationalAcceleration::new(1e-4);
         let particles = vec![
             GravitationalParticle::new(1e10, Vector3::new(1., 0., 0.), Vector3::zeros()),
@@ -147,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn test_center_of_mass() {
+    fn compare_brute_force() {
         let mut rng = rand::thread_rng();
 
         let acceleration = GravitationalAcceleration::new(1e-4);

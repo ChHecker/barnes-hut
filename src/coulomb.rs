@@ -115,7 +115,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_coulomb() {
+    fn test_acceleration() {
         let par1 = CoulombParticle::new(1., 10e-6, Vector3::new(1., 0., 0.), Vector3::zeros());
         let par2 = CoulombParticle::new(1., -10e-6, Vector3::new(-1., 0., 0.), Vector3::zeros());
 
@@ -126,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn test_barnes_hut() {
+    fn test_symmetry() {
         let acc = CoulombAcceleration::new(1e-4);
         let particles = vec![
             CoulombParticle::new(1e10, 1., Vector3::new(1., 0., 0.), Vector3::zeros()),
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn test_center_of_charge() {
+    fn compare_brute_force() {
         let mut rng = rand::thread_rng();
 
         let acceleration = CoulombAcceleration::new(1e-4);
