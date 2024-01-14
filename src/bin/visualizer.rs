@@ -1,15 +1,14 @@
-use std::{ops::Range, time::Instant};
+use std::time::Instant;
 
 use barnes_hut::{gravity::*, octree::Octree, particle::Particle};
 use blue_engine::{primitive_shapes::uv_sphere, Engine, ObjectStorage, WindowDescriptor};
 use nalgebra::Vector3;
 use rand::{rngs::ThreadRng, Rng};
+use rand_distr::{Distribution, Normal};
 
 const SPEED: f64 = 100.;
 
 fn main() {
-    let mut rng = rand::thread_rng();
-
     let mut engine = Engine::new_config(WindowDescriptor {
         width: 1920,
         height: 1080,
@@ -18,15 +17,17 @@ fn main() {
     })
     .unwrap();
 
-    let v_max = 0.1 / SPEED;
+    let mut rng = rand::thread_rng();
+    let normal_pos = Normal::new(0., 3.).unwrap();
+    let normal_vel = Normal::new(0., 0.05 / SPEED).unwrap();
 
     let acc = GravitationalAcceleration::new(1.);
     let mut particles: Vec<_> = (0..200)
         .map(|_| {
             GravitationalParticle::new(
-                rng.gen_range(0.0..1e3),
-                generate_vector3(&mut rng, -2.0..2.0),
-                generate_vector3(&mut rng, -v_max..v_max),
+                rng.gen_range(0.0..1e4),
+                generate_vector3(&mut rng, &normal_pos),
+                generate_vector3(&mut rng, &normal_vel),
             )
         })
         .collect();
@@ -34,7 +35,7 @@ fn main() {
     for (i, par) in particles.iter().enumerate() {
         uv_sphere(
             format!("particle{i}"),
-            (18, 46, par.mass().log10() as f32 / 100.),
+            (8, 20, par.mass().log10() as f32 / 100.),
             &mut engine.renderer,
             &mut engine.objects,
         )
@@ -95,13 +96,12 @@ fn step(
 
         let pos = par.position();
         obj.set_position(pos.x as f32, pos.y as f32, pos.z as f32);
+
+        let col = (0.5 * (pos.z + 1.) + 0.3).clamp(0., 1.) as f32;
+        obj.set_uniform_color(col, col, col, 1.).unwrap();
     }
 }
 
-fn generate_vector3(rng: &mut ThreadRng, range: Range<f64>) -> Vector3<f64> {
-    Vector3::new(
-        rng.gen_range(range.clone()),
-        rng.gen_range(range.clone()),
-        rng.gen_range(range),
-    )
+fn generate_vector3(rng: &mut ThreadRng, dist: &Normal<f64>) -> Vector3<f64> {
+    Vector3::new(dist.sample(rng), dist.sample(rng), dist.sample(rng))
 }

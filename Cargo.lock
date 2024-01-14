@@ -187,6 +187,7 @@ dependencies = [
  "criterion",
  "nalgebra",
  "rand",
+ "rand_distr",
  "rayon",
 ]
 
