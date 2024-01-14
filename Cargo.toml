@@ -1,0 +1,28 @@
+[package]
+name = "barnes_hut"
+authors = ["Christopher Hecker"]
+description = "Implementation of the Barnes-Hut algorithm"
+license = "MIT"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nalgebra = "0.32.3"
+rayon = { version = "1.8.0", optional = true }
+
+[dev-dependencies]
+approx = "0.5.1"
+criterion = "0.5.1"
+nalgebra = { version = "0.32.3", features = ["rand"] }
+rand = "0.8.5"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+
+[[example]]
+name = "gravity"
+
+[[bench]]
+name = "benchmark"
+harness = false

@@ -1,0 +1,3 @@
+- Do not recursively call `calculate_mass` in `calculate_mass`, but calculate it during creation (up to 70%)
+- Replace `[Option<Box<Node>>; 8]` with `Box<[Option<Node>; 8]` (15%)
+- When creating `subnodes`, do not allocate all subnodes at once, but only when you also need to insert a particle (didn't write down improvement)
