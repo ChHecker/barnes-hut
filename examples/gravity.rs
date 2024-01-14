@@ -1,4 +1,7 @@
-use barnes_hut::{force::GravitationalAcceleration, particle::GravitationalParticle, BarnesHut};
+use barnes_hut::{
+    gravity::{GravitationalAcceleration, GravitationalParticle},
+    BarnesHut,
+};
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 

@@ -1,4 +1,5 @@
 pub mod force;
+pub mod gravity;
 pub mod octree;
 pub mod particle;
 
@@ -122,58 +123,5 @@ where
         }
 
         positions
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{force::GravitationalAcceleration, particle::GravitationalParticle};
-
-    use super::*;
-    use approx::assert_abs_diff_eq;
-    use nalgebra::Vector3;
-    use rand::Rng;
-
-    #[test]
-    fn test_barnes_hut() {
-        let acc = GravitationalAcceleration::new(1e-4);
-        let particles = vec![
-            GravitationalParticle::new(1e10, Vector3::new(1., 0., 0.), Vector3::zeros()),
-            GravitationalParticle::new(1e10, Vector3::new(-1., 0., 0.), Vector3::zeros()),
-        ];
-        let mut bh = BarnesHut::new(particles, acc);
-
-        let positions = bh.simulate(1., 1, 1.5);
-
-        let first = &positions[1];
-        assert!(first[0][0] < 1.);
-        assert!(first[1][0] > -1.);
-
-        let last = positions.last().unwrap();
-        assert_abs_diff_eq!(last[0][0], -last[1][0], epsilon = 1e-8);
-
-        for p in last {
-            assert_abs_diff_eq!(p[1], 0., epsilon = 1e-8);
-            assert_abs_diff_eq!(p[2], 0., epsilon = 1e-8);
-        }
-    }
-
-    #[test]
-    fn test_stack_overflow() {
-        let mut rng = rand::thread_rng();
-
-        let acceleration = GravitationalAcceleration::new(1e-4);
-        let particles: Vec<GravitationalParticle> = (0..1000)
-            .map(|_| {
-                GravitationalParticle::new(
-                    rng.gen_range(0.0..1000.0),
-                    Vector3::new_random(),
-                    Vector3::new_random(),
-                )
-            })
-            .collect();
-        let mut bh = BarnesHut::new(particles, acceleration);
-
-        bh.simulate(1., 100, 1.5);
     }
 }

@@ -16,4 +16,4 @@ $$r_{com,new} = \frac{r_{com,prev} + r_{new}}{m_{prev} + m_{new}}.$$
 Examples can be found in the `examples` folder.
 
 ## Optimizations
-For a rough ideas of which optimizations have been implemented, check `optimizations.md`
+For a rough ideas of which optimizations have been implemented, check `optimizations.md`.
