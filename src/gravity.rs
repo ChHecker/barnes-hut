@@ -94,7 +94,7 @@ impl GravitationalAcceleration {
     }
 }
 
-impl Acceleration<f64, GravitationalParticle> for GravitationalAcceleration {
+impl Acceleration<f64> for GravitationalAcceleration {
     fn eval(&self, particle1: &PointCharge<f64>, particle2: &PointCharge<f64>) -> Vector3<f64> {
         let r = particle2.position - particle1.position;
         let r_square = r.norm_squared();

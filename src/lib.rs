@@ -1,4 +1,5 @@
 pub mod acceleration;
+pub mod coulomb;
 pub mod gravity;
 pub mod octree;
 pub mod particle;
@@ -46,7 +47,7 @@ enum Execution {
 pub struct BarnesHut<C, A, P, Q>
 where
     C: Charge,
-    A: Acceleration<C, P>,
+    A: Acceleration<C>,
     P: Particle<C>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
@@ -59,7 +60,7 @@ where
 impl<A, C, P, Q> BarnesHut<C, A, P, Q>
 where
     C: Charge,
-    A: Acceleration<C, P>,
+    A: Acceleration<C>,
     P: Particle<C>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {

@@ -23,7 +23,7 @@ macro_rules! unreachable_debug {
 pub(super) struct Octree<'a, C, A, P>
 where
     C: Charge,
-    A: Acceleration<C, P>,
+    A: Acceleration<C>,
     P: Particle<C>,
 {
     root: Node<'a, C, P>,
@@ -31,7 +31,7 @@ where
     acceleration: &'a A,
 }
 
-impl<'a, C: Charge, A: Acceleration<C, P>, P: Particle<C>> Octree<'a, C, A, P> {
+impl<'a, C: Charge, A: Acceleration<C>, P: Particle<C>> Octree<'a, C, A, P> {
     pub(super) fn new(particles: &'a [P], theta: f64, acceleration: &'a A) -> Self {
         Self {
             root: Node::from_particles(particles),
