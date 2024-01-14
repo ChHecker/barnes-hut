@@ -4,6 +4,7 @@ use crate::{acceleration::Acceleration, octree::PointCharge, particle::Particle}
 
 const G: f64 = 6.6743015e-11;
 
+/// A point mass, i.e. charge = mass.
 #[derive(Clone, Debug)]
 pub struct GravitationalParticle {
     point_charge: PointCharge<f64>,
@@ -81,6 +82,7 @@ impl Particle<f64> for GravitationalParticle {
     }
 }
 
+/// The gravitational force, using a smoothing parameter to lessen the singularity.
 #[derive(Clone, Debug)]
 pub struct GravitationalAcceleration {
     epsilon: f64,
