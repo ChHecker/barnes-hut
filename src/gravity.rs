@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::{force::Acceleration, octree::PointCharge, particle::Particle};
+use crate::{acceleration::Acceleration, octree::PointCharge, particle::Particle};
 
 const G: f64 = 6.6743015e-11;
 

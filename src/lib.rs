@@ -1,4 +1,4 @@
-pub mod force;
+pub mod acceleration;
 pub mod gravity;
 pub mod octree;
 pub mod particle;
@@ -6,7 +6,7 @@ pub mod particle;
 use std::marker::PhantomData;
 
 use crate::octree::Octree;
-use force::Acceleration;
+use acceleration::Acceleration;
 use nalgebra::Vector3;
 use particle::{Charge, Particle};
 #[cfg(feature = "rayon")]

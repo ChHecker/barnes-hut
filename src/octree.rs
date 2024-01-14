@@ -1,7 +1,7 @@
 use nalgebra::Vector3;
 
 use crate::{
-    force::Acceleration,
+    acceleration::Acceleration,
     particle::{Charge, Particle},
 };
 

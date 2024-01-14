@@ -4,7 +4,13 @@ use nalgebra::{SVector, Vector3};
 
 use crate::octree::PointCharge;
 
+/// An generalized charge.
+///
+/// This can be for example the mass for gravity,
+/// or the electrical charge for the Coulomb force.
 pub trait Charge: Clone + Debug + Send + Sync {
+    /// The identity function for this type such that for all charges C
+    /// C + C::identity() = C.
     fn identity() -> Self;
 }
 
@@ -20,6 +26,7 @@ impl<const D: usize> Charge for SVector<f64, D> {
     }
 }
 
+/// A general particle.
 pub trait Particle<C: Charge>: Clone + Debug + Send + Sync {
     fn point_charge(&self) -> &PointCharge<C>;
 
@@ -41,6 +48,9 @@ pub trait Particle<C: Charge>: Clone + Debug + Send + Sync {
 
     fn velocity_mut(&mut self) -> &mut Vector3<f64>;
 
+    /// Calculate the total mass, charge, and center of mass/charge.
+    /// This function has to be [associative](https://en.wikipedia.org/wiki/Associative_property),
+    /// such that it can be recalculated efficiently when adding another particle.
     fn center_of_charge_and_mass(
         mass_acc: f64,
         charge_acc: C,
