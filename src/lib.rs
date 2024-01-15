@@ -3,6 +3,7 @@ pub mod coulomb;
 pub mod gravity;
 pub mod octree;
 pub mod particle;
+pub mod particle_creator;
 #[cfg(feature = "visualization")]
 pub mod visualization;
 

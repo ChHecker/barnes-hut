@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::{
     acceleration::Acceleration,
     particle::{Charge, Particle},
+    particle_creator::ParticleCreator,
     BarnesHut, Step,
 };
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
@@ -48,12 +49,25 @@ where
         for (i, par) in barnes_hut.particles().iter().enumerate() {
             uv_sphere(
                 format!("particle{i}"),
-                (8, 20, par.mass().log10().to_subset().unwrap() as f32 / 100.),
+                (8, 20, par.mass().log10().to_subset().unwrap() as f32 / 50.),
                 &mut engine.renderer,
                 &mut engine.objects,
             )?;
         }
         Ok(Self { engine, barnes_hut })
+    }
+
+    pub fn from_particle_creator<Pc: ParticleCreator<F, C, P>>(
+        mut particle_creator: Pc,
+        num_particles: u32,
+        acceleration: A,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Self> {
+        let particles = particle_creator.create_particles(num_particles);
+        let barnes_hut = BarnesHut::new(particles, acceleration);
+
+        Self::new(barnes_hut, width, height)
     }
 
     /// Visualize the simulation.
