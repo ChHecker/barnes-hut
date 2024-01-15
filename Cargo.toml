@@ -31,10 +31,13 @@ opt-level = 3
 name = "gravity"
 
 [[example]]
+name = "visualize_random"
 required-features = ["randomization", "visualization"]
 
+[[example]]
+name = "visualize_central_body"
+required-features = ["randomization", "visualization"]
 
-name = "visualization"
 [[bench]]
 name = "benchmark"
 harness = false
