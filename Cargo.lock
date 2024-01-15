@@ -182,6 +182,7 @@ dependencies = [
 name = "barnes_hut"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "approx",
  "blue_engine",
  "criterion",

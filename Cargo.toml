@@ -7,28 +7,32 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-visualization = ["blue_engine"]
+default = ["rayon", "visualization"]
+visualization = ["anyhow", "blue_engine"]
 
 [dependencies]
+anyhow = { version = "1.0.79", optional = true }
 blue_engine = { version = "0.5.0", optional = true }
-nalgebra = { version = "0.32.3", features = ["rand"] }
-rand = "0.8.5"
-rand_distr = "0.4.3"
+nalgebra = "0.32.3"
 rayon = { version = "1.8.0", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
 criterion = "0.5.1"
+nalgebra = { version = "0.32.3", features = ["rand"] }
+rand = "0.8.5"
+rand_distr = "0.4.3"
 
 [profile.dev]
 opt-level = 3
 
-[[bin]]
-name = "visualizer"
-required-features = ["visualization"]
-
 [[example]]
 name = "gravity"
+
+[[example]]
+name = "visualization"
+required-features = ["visualization"]
+
 
 [[bench]]
 name = "benchmark"

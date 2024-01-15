@@ -3,6 +3,8 @@ pub mod coulomb;
 pub mod gravity;
 pub mod octree;
 pub mod particle;
+#[cfg(feature = "visualization")]
+pub mod visualization;
 
 use std::marker::PhantomData;
 
@@ -18,6 +20,13 @@ enum Execution {
     SingleThreaded,
     #[cfg(feature = "rayon")]
     MultiThreaded,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Step {
+    First,
+    Middle,
+    Last,
 }
 
 /// Central struct of this library.
@@ -104,6 +113,69 @@ where
         self
     }
 
+    /// Get an immutable reference to the particles.
+    pub fn particles(&self) -> &[P] {
+        self.particles.as_ref()
+    }
+
+    /// Do a single Barnes-Hut step.
+    ///
+    /// # Arguments
+    /// - `time_step`: Size of each time step.
+    /// - `theta`: Theta parameter of the Barnes-Hut algorithm.
+    /// - `acceleration`: The slice to store the accelerations in. Used to avoid allocations.
+    /// - `current_step`: Whether the step is the first, last, or in between.
+    ///     Used to do an Euler step in the beginning and end.
+    pub fn step(
+        &mut self,
+        time_step: F,
+        theta: F,
+        acceleration: &mut [Vector3<F>],
+        current_step: Step,
+    ) {
+        let octree = Octree::new(self.particles.as_ref(), theta, &self.acceleration);
+
+        // Calculate accelerations
+        match self.execution {
+            Execution::SingleThreaded => acceleration.iter_mut().enumerate().for_each(|(i, a)| {
+                *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
+            }),
+            #[cfg(feature = "rayon")]
+            Execution::MultiThreaded => {
+                acceleration.par_iter_mut().enumerate().for_each(|(i, a)| {
+                    *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
+                });
+            }
+        }
+
+        /*
+         * Leapfrog integration:
+         * v_(i + 1/2) = v_(i - 1/2) + a_i dt
+         * x_(i + 1) = x_i + v_(i + 1/2) dt
+         */
+        for (par, acc) in self
+            .particles
+            .as_mut()
+            .iter_mut()
+            .zip(acceleration.iter_mut())
+        {
+            // in first time step, need to get from v_0 to v_(1/2)
+            if let Step::First = current_step {
+                *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
+            } else {
+                *par.velocity_mut() += *acc * time_step;
+            }
+
+            let v = *par.velocity();
+            *par.position_mut() += v * time_step;
+
+            // in last step, need to get from v_(n_steps - 1/2) to v_(n_steps)
+            if let Step::Last = current_step {
+                *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
+            }
+        }
+    }
+
     /// Run the N-body simulation.
     ///
     /// This uses the Barnes-Hut algorithm to calculate the forces on each particle,
@@ -114,6 +186,9 @@ where
     /// - `num_steps`: How many time steps to take.
     /// - `theta`: Theta parameter of the Barnes-Hut algorithm.
     pub fn simulate(&mut self, time_step: F, num_steps: usize, theta: F) -> DMatrix<Vector3<F>> {
+        assert!(time_step > F::from_f64(0.).unwrap());
+        assert!(num_steps > 0);
+
         let n = self.particles.as_ref().len();
 
         let mut positions: DMatrix<Vector3<F>> = DMatrix::zeros(num_steps + 1, n);
@@ -124,50 +199,23 @@ where
         let mut acceleration = vec![Vector3::zeros(); n];
 
         for t in 0..num_steps {
-            let octree = Octree::new(self.particles.as_ref(), theta, &self.acceleration);
+            let current_step = if t == 0 {
+                Step::First
+            } else if t == num_steps - 1 {
+                Step::Last
+            } else {
+                Step::Middle
+            };
 
-            // Calculate accelerations
-            match self.execution {
-                Execution::SingleThreaded => {
-                    acceleration.iter_mut().enumerate().for_each(|(i, a)| {
-                        *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
-                    })
-                }
-                #[cfg(feature = "rayon")]
-                Execution::MultiThreaded => {
-                    acceleration.par_iter_mut().enumerate().for_each(|(i, a)| {
-                        *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
-                    });
-                }
-            }
+            self.step(time_step, theta, &mut acceleration, current_step);
 
-            /*
-             * Leapfrog integration:
-             * v_(i + 1/2) = v_(i - 1/2) + a_i dt
-             * x_(i + 1) = x_i + v_(i + 1/2) dt
-             */
-            for ((par, pos), acc) in self
+            for (par, pos) in self
                 .particles
-                .as_mut()
-                .iter_mut()
+                .as_ref()
+                .iter()
                 .zip(positions.row_mut(t + 1).iter_mut())
-                .zip(acceleration.iter_mut())
             {
-                // in first time step, need to get from v_0 to v_(1/2)
-                if t == 0 {
-                    *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
-                } else {
-                    *par.velocity_mut() += *acc * time_step;
-                }
-
-                let v = *par.velocity();
-                *par.position_mut() += v * time_step;
                 *pos = *par.position();
-
-                // in last step, need to get from v_(n_steps - 1/2) to v_(n_steps)
-                if t == n - 1 {
-                    *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
-                }
             }
         }
 
