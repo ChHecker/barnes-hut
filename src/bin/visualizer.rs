@@ -6,7 +6,9 @@ use nalgebra::Vector3;
 use rand::{rngs::ThreadRng, Rng};
 use rand_distr::{Distribution, Normal};
 
-const SPEED: f64 = 100.;
+type F = f64;
+
+const SPEED: F = 100.;
 
 fn main() {
     let mut engine = Engine::new_config(WindowDescriptor {
@@ -59,8 +61,8 @@ fn main() {
 }
 
 fn step(
-    particles: &mut [GravitationalParticle],
-    grav_acceleration: &GravitationalAcceleration,
+    particles: &mut [GravitationalParticle<F>],
+    grav_acceleration: &GravitationalAcceleration<F>,
     objects: &mut ObjectStorage,
     time: Instant,
     first_time: bool,
@@ -75,7 +77,7 @@ fn step(
     });
 
     println!("fps: {}", 1. / time.elapsed().as_secs_f64());
-    let time_step = time.elapsed().as_secs_f64() * SPEED;
+    let time_step = time.elapsed().as_secs_f64() as F * SPEED;
     for (i, (par, acc)) in particles
         .iter_mut()
         .zip(acceleration.iter_mut())
@@ -102,6 +104,6 @@ fn step(
     }
 }
 
-fn generate_vector3(rng: &mut ThreadRng, dist: &Normal<f64>) -> Vector3<f64> {
+fn generate_vector3(rng: &mut ThreadRng, dist: &Normal<F>) -> Vector3<F> {
     Vector3::new(dist.sample(rng), dist.sample(rng), dist.sample(rng))
 }

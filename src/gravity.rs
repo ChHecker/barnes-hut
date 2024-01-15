@@ -1,4 +1,6 @@
-use nalgebra::Vector3;
+use std::ops::Mul;
+
+use nalgebra::{RealField, Vector3};
 
 use crate::{acceleration::Acceleration, octree::PointCharge, particle::Particle};
 
@@ -6,13 +8,16 @@ const G: f64 = 6.6743015e-11;
 
 /// A point mass, i.e. charge = mass.
 #[derive(Clone, Debug)]
-pub struct GravitationalParticle {
-    point_charge: PointCharge<f64>,
-    velocity: Vector3<f64>,
+pub struct GravitationalParticle<F: RealField + Copy> {
+    point_charge: PointCharge<F, F>,
+    velocity: Vector3<F>,
 }
 
-impl GravitationalParticle {
-    pub fn new(mass: f64, position: Vector3<f64>, velocity: Vector3<f64>) -> Self {
+impl<F: RealField + Copy> GravitationalParticle<F>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    pub fn new(mass: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self {
             point_charge: PointCharge {
                 mass,
@@ -24,56 +29,59 @@ impl GravitationalParticle {
     }
 }
 
-impl Particle<f64> for GravitationalParticle {
-    fn point_charge(&self) -> &PointCharge<f64> {
+impl<F: RealField + Copy> Particle<F, F> for GravitationalParticle<F>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    fn point_charge(&self) -> &PointCharge<F, F> {
         &self.point_charge
     }
 
-    fn point_charge_mut(&mut self) -> &mut PointCharge<f64> {
+    fn point_charge_mut(&mut self) -> &mut PointCharge<F, F> {
         &mut self.point_charge
     }
 
-    fn mass(&self) -> &f64 {
+    fn mass(&self) -> &F {
         self.charge()
     }
 
-    fn mass_mut(&mut self) -> &mut f64 {
+    fn mass_mut(&mut self) -> &mut F {
         self.charge_mut()
     }
 
-    fn charge(&self) -> &f64 {
+    fn charge(&self) -> &F {
         &self.point_charge.charge
     }
 
-    fn charge_mut(&mut self) -> &mut f64 {
+    fn charge_mut(&mut self) -> &mut F {
         &mut self.point_charge.charge
     }
 
-    fn position(&self) -> &Vector3<f64> {
+    fn position(&self) -> &Vector3<F> {
         &self.point_charge.position
     }
 
-    fn position_mut(&mut self) -> &mut Vector3<f64> {
+    fn position_mut(&mut self) -> &mut Vector3<F> {
         &mut self.point_charge.position
     }
 
-    fn velocity(&self) -> &Vector3<f64> {
+    fn velocity(&self) -> &Vector3<F> {
         &self.velocity
     }
 
-    fn velocity_mut(&mut self) -> &mut Vector3<f64> {
+    fn velocity_mut(&mut self) -> &mut Vector3<F> {
         &mut self.velocity
     }
 
     fn center_of_charge_and_mass(
-        _mass_acc: f64,
-        charge_acc: f64,
-        position_acc: Vector3<f64>,
-        _mass: f64,
-        charge: &f64,
-        position: &Vector3<f64>,
-    ) -> (f64, f64, Vector3<f64>) {
-        let charge_sum = charge_acc + charge;
+        _mass_acc: F,
+        charge_acc: F,
+        position_acc: Vector3<F>,
+        _mass: F,
+        charge: &F,
+        position: &Vector3<F>,
+    ) -> (F, F, Vector3<F>) {
+        let charge_sum = charge_acc + *charge;
         (
             charge_sum,
             charge_sum,
@@ -84,21 +92,30 @@ impl Particle<f64> for GravitationalParticle {
 
 /// The gravitational force, using a smoothing parameter to lessen the singularity.
 #[derive(Clone, Debug)]
-pub struct GravitationalAcceleration {
-    epsilon: f64,
+pub struct GravitationalAcceleration<F: RealField + Copy>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    epsilon: F,
 }
 
-impl GravitationalAcceleration {
-    pub fn new(epsilon: f64) -> Self {
+impl<F: RealField + Copy> GravitationalAcceleration<F>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    pub fn new(epsilon: F) -> Self {
         Self { epsilon }
     }
 }
 
-impl Acceleration<f64> for GravitationalAcceleration {
-    fn eval(&self, particle1: &PointCharge<f64>, particle2: &PointCharge<f64>) -> Vector3<f64> {
+impl<F: RealField + Copy> Acceleration<F, F> for GravitationalAcceleration<F>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    fn eval(&self, particle1: &PointCharge<F, F>, particle2: &PointCharge<F, F>) -> Vector3<F> {
         let r = particle2.position - particle1.position;
         let r_square = r.norm_squared();
-        G * particle2.mass / (r_square + self.epsilon).sqrt().powi(3) * r
+        F::from_f64(G).unwrap() * particle2.mass / (r_square + self.epsilon).sqrt().powi(3) * r
     }
 }
 
@@ -152,7 +169,7 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         let acceleration = GravitationalAcceleration::new(1e-4);
-        let particles: Vec<GravitationalParticle> = (0..100)
+        let particles: Vec<GravitationalParticle<f64>> = (0..100)
             .map(|_| {
                 GravitationalParticle::new(
                     rng.gen_range(0.0..1000.0),

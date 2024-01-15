@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 
 use crate::octree::Octree;
 use acceleration::Acceleration;
-use nalgebra::{DMatrix, Vector3};
+use nalgebra::{DMatrix, RealField, Vector3};
 use particle::{Charge, Particle};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -45,24 +45,26 @@ enum Execution {
 /// );
 /// ```
 #[derive(Debug)]
-pub struct BarnesHut<C, A, P, Q>
+pub struct BarnesHut<F, C, A, P, Q>
 where
+    F: RealField + Copy,
     C: Charge,
-    A: Acceleration<C>,
-    P: Particle<C>,
+    A: Acceleration<F, C>,
+    P: Particle<F, C>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
     particles: Q,
     acceleration: A,
     execution: Execution,
-    phantom: PhantomData<(C, P)>,
+    phantom: PhantomData<(F, C, P)>,
 }
 
-impl<A, C, P, Q> BarnesHut<C, A, P, Q>
+impl<F, A, C, P, Q> BarnesHut<F, C, A, P, Q>
 where
+    F: RealField + Copy,
     C: Charge,
-    A: Acceleration<C>,
-    P: Particle<C>,
+    A: Acceleration<F, C>,
+    P: Particle<F, C>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
     pub fn new(particles: Q, acceleration: A) -> Self {
@@ -111,15 +113,10 @@ where
     /// - `time_step`: Size of each time step.
     /// - `num_steps`: How many time steps to take.
     /// - `theta`: Theta parameter of the Barnes-Hut algorithm.
-    pub fn simulate(
-        &mut self,
-        time_step: f64,
-        num_steps: usize,
-        theta: f64,
-    ) -> DMatrix<Vector3<f64>> {
+    pub fn simulate(&mut self, time_step: F, num_steps: usize, theta: F) -> DMatrix<Vector3<F>> {
         let n = self.particles.as_ref().len();
 
-        let mut positions: DMatrix<Vector3<f64>> = DMatrix::zeros(num_steps + 1, n);
+        let mut positions: DMatrix<Vector3<F>> = DMatrix::zeros(num_steps + 1, n);
         for (i, pos) in positions.row_mut(0).iter_mut().enumerate() {
             *pos = *self.particles.as_ref()[i].position();
         }
@@ -158,7 +155,7 @@ where
             {
                 // in first time step, need to get from v_0 to v_(1/2)
                 if t == 0 {
-                    *par.velocity_mut() += *acc * time_step / 2.;
+                    *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
                 } else {
                     *par.velocity_mut() += *acc * time_step;
                 }
@@ -169,7 +166,7 @@ where
 
                 // in last step, need to get from v_(n_steps - 1/2) to v_(n_steps)
                 if t == n - 1 {
-                    *par.velocity_mut() += *acc * time_step / 2.;
+                    *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
                 }
             }
         }

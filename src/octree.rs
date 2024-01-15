@@ -1,4 +1,4 @@
-use nalgebra::Vector3;
+use nalgebra::{RealField, Vector3};
 
 use crate::{
     acceleration::Acceleration,
@@ -20,19 +20,26 @@ macro_rules! unreachable_debug {
 }
 
 #[derive(Clone, Debug)]
-pub struct Octree<'a, C, A, P>
+pub struct Octree<'a, F, C, A, P>
 where
+    F: RealField + Copy,
     C: Charge,
-    A: Acceleration<C>,
-    P: Particle<C>,
+    A: Acceleration<F, C>,
+    P: Particle<F, C>,
 {
-    root: Node<'a, C, P>,
-    theta: f64,
+    root: Node<'a, F, C, P>,
+    theta: F,
     acceleration: &'a A,
 }
 
-impl<'a, C: Charge, A: Acceleration<C>, P: Particle<C>> Octree<'a, C, A, P> {
-    pub fn new(particles: &'a [P], theta: f64, acceleration: &'a A) -> Self {
+impl<'a, F, C, A, P> Octree<'a, F, C, A, P>
+where
+    F: RealField + Copy,
+    C: Charge,
+    A: Acceleration<F, C>,
+    P: Particle<F, C>,
+{
+    pub fn new(particles: &'a [P], theta: F, acceleration: &'a A) -> Self {
         Self {
             root: Node::from_particles(particles),
             theta,
@@ -40,7 +47,7 @@ impl<'a, C: Charge, A: Acceleration<C>, P: Particle<C>> Octree<'a, C, A, P> {
         }
     }
 
-    pub fn calculate_acceleration(&self, particle: &P) -> Vector3<f64> {
+    pub fn calculate_acceleration(&self, particle: &P) -> Vector3<F> {
         self.root.calculate_acceleration(
             particle,
             &|p1, p2| self.acceleration.eval(p1, p2),
@@ -50,31 +57,50 @@ impl<'a, C: Charge, A: Acceleration<C>, P: Particle<C>> Octree<'a, C, A, P> {
 }
 
 #[derive(Clone, Debug)]
-pub struct PointCharge<C: Charge> {
-    pub mass: f64,
+pub struct PointCharge<F, C>
+where
+    F: RealField + Copy,
+    C: Charge,
+{
+    pub mass: F,
     pub charge: C,
-    pub position: Vector3<f64>,
+    pub position: Vector3<F>,
 }
 
 #[derive(Clone, Debug)]
-enum OptionalCharge<'a, C: Charge, P: Particle<C>> {
-    Point(PointCharge<C>),
+enum OptionalCharge<'a, F, C, P>
+where
+    F: RealField + Copy,
+    C: Charge,
+    P: Particle<F, C>,
+{
+    Point(PointCharge<F, C>),
     Particle(&'a P),
     None,
 }
 
-type Subnodes<'a, C, P> = [Option<Node<'a, C, P>>; 8];
+type Subnodes<'a, F, C, P> = [Option<Node<'a, F, C, P>>; 8];
 
 #[derive(Clone, Debug)]
-struct Node<'a, C: Charge, P: Particle<C>> {
-    subnodes: Option<Box<Subnodes<'a, C, P>>>,
-    charge: OptionalCharge<'a, C, P>,
-    center: Vector3<f64>,
-    width: f64,
+struct Node<'a, F, C, P>
+where
+    F: RealField + Copy,
+    C: Charge,
+    P: Particle<F, C>,
+{
+    subnodes: Option<Box<Subnodes<'a, F, C, P>>>,
+    charge: OptionalCharge<'a, F, C, P>,
+    center: Vector3<F>,
+    width: F,
 }
 
-impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
-    fn new(center: Vector3<f64>, width: f64) -> Self {
+impl<'a, F, C, P> Node<'a, F, C, P>
+where
+    F: RealField + Copy,
+    C: Charge,
+    P: Particle<F, C>,
+{
+    fn new(center: Vector3<F>, width: F) -> Self {
         Self {
             subnodes: None,
             charge: OptionalCharge::None,
@@ -119,7 +145,7 @@ impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
                     .get_or_insert_with(|| {
                         Node::new(
                             Self::center_from_subnode_static(self.width, self.center, new_subnode),
-                            self.width / 2.,
+                            self.width / F::from_f64(2.).unwrap(),
                         )
                     })
                     .insert_particle(particle);
@@ -133,16 +159,20 @@ impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
                 OptionalCharge::Particle(previous_particle) => {
                     let previous_index =
                         Self::choose_subnode(&self.center, previous_particle.position());
-                    let mut previous_node =
-                        Node::new(self.center_from_subnode(previous_index), self.width / 2.);
+                    let mut previous_node = Node::new(
+                        self.center_from_subnode(previous_index),
+                        self.width / F::from_f64(2.).unwrap(),
+                    );
                     previous_node.insert_particle(previous_particle);
 
                     let new_index = Self::choose_subnode(&self.center, particle.position());
-                    let mut new_node =
-                        Node::new(self.center_from_subnode(new_index), self.width / 2.);
+                    let mut new_node = Node::new(
+                        self.center_from_subnode(new_index),
+                        self.width / F::from_f64(2.).unwrap(),
+                    );
                     new_node.insert_particle(particle);
 
-                    let mut new_nodes: Subnodes<'a, C, P> = Default::default();
+                    let mut new_nodes: Subnodes<'a, F, C, P> = Default::default();
                     new_nodes[previous_index] = Some(previous_node);
                     new_nodes[new_index] = Some(new_node);
 
@@ -180,7 +210,7 @@ impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
                     OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
-                    (0., C::identity(), Vector3::zeros()),
+                    (F::zero(), C::identity(), Vector3::zeros()),
                     |(m_acc, c_acc, pos_acc), (&m, c, pos)| {
                         P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, c, pos)
                     },
@@ -197,9 +227,9 @@ impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
     fn calculate_acceleration(
         &self,
         particle: &P,
-        acceleration_fn: &(impl Fn(&PointCharge<C>, &PointCharge<C>) -> Vector3<f64> + Send + Sync),
-        theta: f64,
-    ) -> Vector3<f64> {
+        acceleration_fn: &(impl Fn(&PointCharge<F, C>, &PointCharge<F, C>) -> Vector3<F> + Send + Sync),
+        theta: F,
+    ) -> Vector3<F> {
         let mut acc = Vector3::zeros();
 
         match &self.charge {
@@ -241,7 +271,7 @@ impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
         acc
     }
 
-    fn choose_subnode(center: &Vector3<f64>, position: &Vector3<f64>) -> usize {
+    fn choose_subnode(center: &Vector3<F>, position: &Vector3<F>) -> usize {
         if position.x > center.x {
             if position.y > center.y {
                 if position.z > center.z {
@@ -266,12 +296,12 @@ impl<'a, C: Charge, P: Particle<C>> Node<'a, C, P> {
         6
     }
 
-    fn center_from_subnode(&self, i: usize) -> Vector3<f64> {
+    fn center_from_subnode(&self, i: usize) -> Vector3<F> {
         Self::center_from_subnode_static(self.width, self.center, i)
     }
 
-    fn center_from_subnode_static(width: f64, center: Vector3<f64>, i: usize) -> Vector3<f64> {
-        let step_size = width / 2.;
+    fn center_from_subnode_static(width: F, center: Vector3<F>, i: usize) -> Vector3<F> {
+        let step_size = width / F::from_f64(2.).unwrap();
         if i == 0 {
             return center + Vector3::new(step_size, step_size, step_size);
         }

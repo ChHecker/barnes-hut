@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use nalgebra::{SVector, Vector3};
+use nalgebra::{RealField, Vector3};
 
 use crate::octree::PointCharge;
 
@@ -14,49 +14,43 @@ pub trait Charge: Clone + Debug + Send + Sync {
     fn identity() -> Self;
 }
 
-impl Charge for f64 {
+impl<F: RealField + Copy> Charge for F {
     fn identity() -> Self {
-        0.
-    }
-}
-
-impl<const D: usize> Charge for SVector<f64, D> {
-    fn identity() -> Self {
-        SVector::zeros()
+        F::zero()
     }
 }
 
 /// A general particle.
-pub trait Particle<C: Charge>: Clone + Debug + Send + Sync {
-    fn point_charge(&self) -> &PointCharge<C>;
+pub trait Particle<F: RealField + Copy, C: Charge>: Clone + Debug + Send + Sync {
+    fn point_charge(&self) -> &PointCharge<F, C>;
 
-    fn point_charge_mut(&mut self) -> &mut PointCharge<C>;
+    fn point_charge_mut(&mut self) -> &mut PointCharge<F, C>;
 
-    fn mass(&self) -> &f64;
+    fn mass(&self) -> &F;
 
-    fn mass_mut(&mut self) -> &mut f64;
+    fn mass_mut(&mut self) -> &mut F;
 
     fn charge(&self) -> &C;
 
     fn charge_mut(&mut self) -> &mut C;
 
-    fn position(&self) -> &Vector3<f64>;
+    fn position(&self) -> &Vector3<F>;
 
-    fn position_mut(&mut self) -> &mut Vector3<f64>;
+    fn position_mut(&mut self) -> &mut Vector3<F>;
 
-    fn velocity(&self) -> &Vector3<f64>;
+    fn velocity(&self) -> &Vector3<F>;
 
-    fn velocity_mut(&mut self) -> &mut Vector3<f64>;
+    fn velocity_mut(&mut self) -> &mut Vector3<F>;
 
     /// Calculate the total mass, charge, and center of mass/charge.
     /// This function has to be [associative](https://en.wikipedia.org/wiki/Associative_property),
     /// such that it can be recalculated efficiently when adding another particle.
     fn center_of_charge_and_mass(
-        mass_acc: f64,
+        mass_acc: F,
         charge_acc: C,
-        position_acc: Vector3<f64>,
-        mass: f64,
+        position_acc: Vector3<F>,
+        mass: F,
         charge: &C,
-        position: &Vector3<f64>,
-    ) -> (f64, C, Vector3<f64>);
+        position: &Vector3<F>,
+    ) -> (F, C, Vector3<F>);
 }
