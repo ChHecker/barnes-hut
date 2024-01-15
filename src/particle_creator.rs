@@ -163,7 +163,7 @@ mod random {
             let rng = &mut self.rng;
 
             let r = self.radial_distr.sample(rng);
-            let phi = Uniform::new(F::zero(), F::from_f64(2.).unwrap() * F::pi()).sample(rng);
+            let phi = Uniform::new(F::zero(), F::two_pi()).sample(rng);
             let pos = Vector3::new(r * phi.cos(), r * phi.sin(), F::zero());
 
             let mut vel = Vector3::new(-phi.sin(), phi.cos(), F::zero());
@@ -183,19 +183,20 @@ mod random {
 
         #[test]
         fn test_central_body() {
+            let num_steps = 1000;
             let acc = GravitationalAcceleration::new(1e-4f64);
 
             let mut pc = CentralBodyParticleCreator::new(
                 1e10,
-                Uniform::new(0., 1e2),
-                Uniform::new(0.5, 1.5),
+                Uniform::new(100., 100.1),
+                Uniform::new(1., 1.1),
             );
             let par = pc.create_particles(2);
 
             let mut bh = BarnesHut::new(par, acc);
-            let pos = bh.simulate(0.1, 100, 0.);
+            let pos = bh.simulate(0.1, num_steps, 0.);
 
-            let last = pos.row(10);
+            let last = pos.row(num_steps);
             for i in 0..3 {
                 assert_abs_diff_eq!(last[0][i], 0., epsilon = 1e-1);
                 assert!(last[1][i].abs() < 2.)
