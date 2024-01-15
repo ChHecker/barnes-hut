@@ -17,3 +17,7 @@ Examples can be found in the `examples` folder.
 
 ## Optimizations
 For a rough ideas of which optimizations have been implemented, check `optimizations.md`.
+
+## Licenses
+For all licenses of dependencies, look into `license.html`.  
+This file was automatically created using [cargo-about](https://github.com/EmbarkStudios/cargo-about) (Embark Studios).
