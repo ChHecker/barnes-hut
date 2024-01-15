@@ -37,6 +37,10 @@ impl<F: RealField + Copy> Particle<F, F> for CoulombParticle<F>
 where
     F: Mul<Vector3<F>, Output = Vector3<F>>,
 {
+    fn particle(mass: F, charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
+        Self::new(mass, charge, position, velocity)
+    }
+
     fn point_charge(&self) -> &PointCharge<F, F> {
         &self.point_charge
     }

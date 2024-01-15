@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use nalgebra::{RealField, Vector3};
 
 use crate::octree::PointCharge;
@@ -8,7 +6,7 @@ use crate::octree::PointCharge;
 ///
 /// This can be for example the mass for gravity,
 /// or the electrical charge for the Coulomb force.
-pub trait Charge: Clone + Debug + Send + Sync {
+pub trait Charge: Send + Sync {
     /// The identity function for this type such that for all charges C
     /// C + C::identity() = C.
     fn identity() -> Self;
@@ -21,7 +19,9 @@ impl<F: RealField + Copy> Charge for F {
 }
 
 /// A general particle.
-pub trait Particle<F: RealField + Copy, C: Charge>: Clone + Debug + Send + Sync {
+pub trait Particle<F: RealField + Copy, C: Charge>: Send + Sync {
+    fn particle(mass: F, charge: C, position: Vector3<F>, velocity: Vector3<F>) -> Self;
+
     fn point_charge(&self) -> &PointCharge<F, C>;
 
     fn point_charge_mut(&mut self) -> &mut PointCharge<F, C>;

@@ -4,7 +4,7 @@ use nalgebra::{RealField, Vector3};
 
 use crate::{acceleration::Acceleration, octree::PointCharge, particle::Particle};
 
-const G: f64 = 6.6743015e-11;
+pub const G: f64 = 6.6743015e-11;
 
 /// A point mass, i.e. charge = mass.
 #[derive(Clone, Debug)]
@@ -15,7 +15,7 @@ pub struct GravitationalParticle<F: RealField + Copy> {
 
 impl<F: RealField + Copy> GravitationalParticle<F>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
     pub fn new(mass: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self {
@@ -31,8 +31,12 @@ where
 
 impl<F: RealField + Copy> Particle<F, F> for GravitationalParticle<F>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
+    fn particle(mass: F, _charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
+        Self::new(mass, position, velocity)
+    }
+
     fn point_charge(&self) -> &PointCharge<F, F> {
         &self.point_charge
     }
@@ -85,7 +89,7 @@ where
         (
             charge_sum,
             charge_sum,
-            (charge_acc * position_acc + *charge * *position) / charge_sum,
+            (position_acc * charge_acc + *position * *charge) / charge_sum,
         )
     }
 }
