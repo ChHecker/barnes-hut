@@ -3,30 +3,25 @@ use std::ops::Mul;
 use nalgebra::{RealField, Vector3};
 
 use crate::{
-    charge_wrapper,
     interaction::{Acceleration, Particle},
     octree::PointCharge,
-    samplable_charge_wrapper,
 };
 
 const K: f64 = 8.99e09;
 pub const E: f64 = 1.60217663e-19;
 
-charge_wrapper!(ElectricalCharge);
-samplable_charge_wrapper!(ElectricalCharge);
-
 /// The Coulomb force, using a smoothing parameter to lessen the singularity.
 #[derive(Clone, Debug)]
 pub struct CoulombAcceleration<F: RealField + Copy>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
     epsilon: F,
 }
 
 impl<F: RealField + Copy> CoulombAcceleration<F>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
     pub fn new(epsilon: F) -> Self {
         Self { epsilon }
@@ -35,22 +30,17 @@ where
 
 impl<F: RealField + Copy> Acceleration<F> for CoulombAcceleration<F>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
-    type Charge = ElectricalCharge<F>;
+    type Charge = F;
     type Particle = CoulombParticle<F>;
 
-    fn eval(
-        &self,
-        particle1: &PointCharge<F, ElectricalCharge<F>>,
-        particle2: &PointCharge<F, ElectricalCharge<F>>,
-    ) -> Vector3<F> {
+    fn eval(&self, particle1: &PointCharge<F, F>, particle2: &PointCharge<F, F>) -> Vector3<F> {
         let r = particle1.position - particle2.position;
         let r_square = r.norm_squared();
-        F::from_f64(K).unwrap() * *particle1.charge * *particle2.charge
+        r * F::from_f64(K).unwrap() * particle1.charge * particle2.charge
             / particle1.mass
             / (r_square + self.epsilon).sqrt().powi(3)
-            * r
     }
 }
 
@@ -58,19 +48,19 @@ where
 #[derive(Clone, Debug)]
 pub struct CoulombParticle<F: RealField + Copy>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
-    point_charge: PointCharge<F, ElectricalCharge<F>>,
+    point_charge: PointCharge<F, F>,
     velocity: Vector3<F>,
 }
 
 impl<F: RealField + Copy> CoulombParticle<F>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
     pub fn new(mass: F, charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self {
-            point_charge: PointCharge::new(mass, ElectricalCharge(charge), position),
+            point_charge: PointCharge::new(mass, charge, position),
             velocity,
         }
     }
@@ -78,28 +68,23 @@ where
 
 impl<F: RealField + Copy> Particle<F> for CoulombParticle<F>
 where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
-    type Charge = ElectricalCharge<F>;
+    type Charge = F;
     type Acceleration = CoulombAcceleration<F>;
 
-    fn particle(
-        mass: F,
-        charge: ElectricalCharge<F>,
-        position: Vector3<F>,
-        velocity: Vector3<F>,
-    ) -> Self {
+    fn particle(mass: F, charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self {
             point_charge: PointCharge::new(mass, charge, position),
             velocity,
         }
     }
 
-    fn point_charge(&self) -> &PointCharge<F, ElectricalCharge<F>> {
+    fn point_charge(&self) -> &PointCharge<F, F> {
         &self.point_charge
     }
 
-    fn point_charge_mut(&mut self) -> &mut PointCharge<F, ElectricalCharge<F>> {
+    fn point_charge_mut(&mut self) -> &mut PointCharge<F, F> {
         &mut self.point_charge
     }
 
@@ -111,11 +96,11 @@ where
         &mut self.point_charge.mass
     }
 
-    fn charge(&self) -> &ElectricalCharge<F> {
+    fn charge(&self) -> &F {
         &self.point_charge.charge
     }
 
-    fn charge_mut(&mut self) -> &mut ElectricalCharge<F> {
+    fn charge_mut(&mut self) -> &mut F {
         &mut self.point_charge.charge
     }
 
@@ -137,16 +122,16 @@ where
 
     fn center_of_charge_and_mass(
         mass_acc: F,
-        charge_acc: ElectricalCharge<F>,
+        charge_acc: F,
         position_acc: Vector3<F>,
         mass: F,
-        charge: &ElectricalCharge<F>,
+        charge: &F,
         position: &Vector3<F>,
-    ) -> (F, ElectricalCharge<F>, Vector3<F>) {
+    ) -> (F, F, Vector3<F>) {
         (
             mass_acc + mass,
-            ElectricalCharge(*charge_acc + **charge),
-            (*charge_acc * position_acc + **charge * *position) / (*charge_acc + **charge),
+            charge_acc + *charge,
+            (position_acc * *charge + *position * *charge) / (charge_acc + *charge),
         )
     }
 }
