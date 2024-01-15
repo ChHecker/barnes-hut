@@ -123,8 +123,9 @@ where
             }
         }
         let width = (v_max - v_min).max();
+        let center = v_min + v_max / F::from_f64(2.).unwrap();
 
-        let mut node = Self::new(Vector3::zeros(), width);
+        let mut node = Self::new(center, width);
 
         for particle in particles {
             node.insert_particle(particle);
@@ -141,14 +142,13 @@ where
             Some(subnodes) => {
                 let new_subnode = Self::choose_subnode(&self.center, particle.position());
 
-                subnodes[new_subnode]
-                    .get_or_insert_with(|| {
-                        Node::new(
-                            Self::center_from_subnode_static(self.width, self.center, new_subnode),
-                            self.width / F::from_f64(2.).unwrap(),
-                        )
-                    })
-                    .insert_particle(particle);
+                let node = subnodes[new_subnode].get_or_insert_with(|| {
+                    Node::new(
+                        Self::center_from_subnode_static(self.width, self.center, new_subnode),
+                        self.width / F::from_f64(2.).unwrap(),
+                    )
+                });
+                node.insert_particle(particle);
 
                 self.calculate_charge();
             }
@@ -157,28 +157,7 @@ where
             None => match self.charge {
                 // Self contains a particle, subdivide
                 OptionalCharge::Particle(previous_particle) => {
-                    let previous_index =
-                        Self::choose_subnode(&self.center, previous_particle.position());
-                    let mut previous_node = Node::new(
-                        self.center_from_subnode(previous_index),
-                        self.width / F::from_f64(2.).unwrap(),
-                    );
-                    previous_node.insert_particle(previous_particle);
-
-                    let new_index = Self::choose_subnode(&self.center, particle.position());
-                    let mut new_node = Node::new(
-                        self.center_from_subnode(new_index),
-                        self.width / F::from_f64(2.).unwrap(),
-                    );
-                    new_node.insert_particle(particle);
-
-                    let mut new_nodes: Subnodes<'a, F, C, P> = Default::default();
-                    new_nodes[previous_index] = Some(previous_node);
-                    new_nodes[new_index] = Some(new_node);
-
-                    self.subnodes = Some(Box::new(new_nodes));
-                    self.charge = OptionalCharge::None;
-                    self.calculate_charge();
+                    self.insert_particle_subdivide(previous_particle, particle);
                 }
 
                 OptionalCharge::Point(_) => {
@@ -193,11 +172,45 @@ where
         }
     }
 
-    fn calculate_charge(&mut self) {
-        if let OptionalCharge::Particle(_) = self.charge {
-            unreachable_debug!("calculate_charge shouldn't be called on nodes containing particles")
-        }
+    fn insert_particle_subdivide(&mut self, previous_particle: &'a P, new_particle: &'a P) {
+        let mut new_nodes: Subnodes<'a, F, C, P> = Default::default();
 
+        // Create subnode for previous particle
+        let previous_index = Self::choose_subnode(&self.center, previous_particle.position());
+        let mut previous_node = Node::new(
+            self.center_from_subnode(previous_index),
+            self.width / F::from_f64(2.).unwrap(),
+        );
+
+        let new_index = Self::choose_subnode(&self.center, new_particle.position());
+        // If previous and new particle belong in separate nodes, particles can be trivially inserted
+        // (self.insert_particle would crash because one node wouldn't have a mass yet)
+        // Otherwise, call insert on self below so self can be subdivided again
+        if new_index != previous_index {
+            let mut new_node = Node::new(
+                self.center_from_subnode(new_index),
+                self.width / F::from_f64(2.).unwrap(),
+            );
+            // Insert new particle
+            new_node.charge = OptionalCharge::Particle(new_particle);
+            new_nodes[new_index] = Some(new_node);
+
+            // Insert previous particle
+            previous_node.charge = OptionalCharge::Particle(previous_particle);
+        }
+        new_nodes[previous_index] = Some(previous_node);
+
+        self.subnodes = Some(Box::new(new_nodes));
+
+        // If particles belong in the same cell, call insert on self so self can be subdivided again
+        if previous_index == new_index {
+            self.insert_particle(previous_particle);
+            self.insert_particle(new_particle);
+        }
+        self.calculate_charge();
+    }
+
+    fn calculate_charge(&mut self) {
         if let Some(subnodes) = &mut self.subnodes {
             let (mass, charge, center_of_charge) = subnodes
                 .iter_mut()
