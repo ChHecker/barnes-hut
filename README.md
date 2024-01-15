@@ -4,6 +4,7 @@ Implementation of the [Barnes-Hut algorithm](https://en.wikipedia.org/wiki/Barne
 **This is an exercise in optimization, but not production ready!**
 
 ## Design
+### Barnes-Hut
 This tries to be generic over the force and particle kind. The basic abstraction is that every force depends on a particle's mass and some generalized charge.
 
 - A charge is some type `C` that is `Clone`, `Debug`, `Send`, and `Sync`, and offers an identity function. For example, the mass or electrical charge are just `f64`s with the identity `0.`. Explicitly, the type should implement the `Charge` trait.
@@ -14,6 +15,11 @@ $$r_{com,new} = \frac{r_{com,prev} + r_{new}}{m_{prev} + m_{new}}.$$
 - In order to then start an N-body simulation, create a `BarnesHut` object with either a `Vec<Particle>` or `&mut [Particle]` and an `Acceleration`. If you want to calculate the forces on multiple core, also call `multi_threaded` on it. Then, you can run `simulate`.
 
 Examples can be found in the `examples` folder.
+
+### Visualization
+Blue Engine (Elham Aryanpur 2021) is used in order to visualize the particles in 3D. \
+Each particle is represented by one sphere, whose radius depends on the particle's mass.
+The spheres are also colored according to their z coordinate to facilitate depth perception.
 
 ## Optimizations
 For a rough ideas of which optimizations have been implemented, check `optimizations.md`.
