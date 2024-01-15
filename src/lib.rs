@@ -30,6 +30,18 @@ pub enum Step {
     Last,
 }
 
+impl Step {
+    pub fn from_index(index: usize, num_steps: usize) -> Self {
+        if index == 0 {
+            Step::First
+        } else if index == num_steps - 1 {
+            Step::Last
+        } else {
+            Step::Middle
+        }
+    }
+}
+
 /// Central struct of this library.
 ///
 /// Use this to initialize and start an N-body simulation.
@@ -200,13 +212,7 @@ where
         let mut acceleration = vec![Vector3::zeros(); n];
 
         for t in 0..num_steps {
-            let current_step = if t == 0 {
-                Step::First
-            } else if t == num_steps - 1 {
-                Step::Last
-            } else {
-                Step::Middle
-            };
+            let current_step = Step::from_index(t, num_steps);
 
             self.step(time_step, theta, &mut acceleration, current_step);
 
