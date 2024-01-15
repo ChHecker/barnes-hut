@@ -7,6 +7,9 @@ pub mod particle_creator;
 #[cfg(feature = "visualization")]
 pub mod visualization;
 
+#[cfg(test)]
+mod csv;
+
 use std::marker::PhantomData;
 
 use crate::octree::Octree;
