@@ -1,17 +1,11 @@
-use nalgebra::{RealField, Vector3};
-use rand::rngs::ThreadRng;
+use nalgebra::RealField;
 
-use crate::particle::{Charge, Particle};
+use crate::interaction::Particle;
 
-use std::marker::PhantomData;
-
-use rand_distr::Distribution;
-
-pub trait ParticleCreator<F, C, P>
+pub trait ParticleCreator<F, P>
 where
     F: RealField + Copy,
-    C: Charge,
-    P: Particle<F, C>,
+    P: Particle<F>,
 {
     fn create_particle(&mut self) -> P;
 
@@ -25,20 +19,25 @@ pub use random::*;
 
 #[cfg(feature = "randomization")]
 mod random {
-    use rand_distr::{uniform::SampleUniform, Uniform};
+    use std::marker::PhantomData;
+    use std::ops::Mul;
 
-    use crate::gravity::{GravitationalParticle, G};
+    use nalgebra::Vector3;
+    use rand::rngs::ThreadRng;
+    use rand_distr::uniform::SampleUniform;
+    use rand_distr::{Distribution, Uniform};
 
     use super::*;
+    use crate::gravity::{GravitationalParticle, G};
+    use crate::interaction::{SamplableCharge, SamplableParticle};
 
     #[derive(Clone)]
-    pub struct DistrParticleCreator<F, C, P, MD, CD, PD, VD>
+    pub struct DistrParticleCreator<F, P, MD, CD, PD, VD>
     where
         F: RealField + Copy,
-        C: Charge,
-        P: Particle<F, C>,
+        P: SamplableParticle<F>,
         MD: Distribution<F>,
-        CD: Distribution<C>,
+        CD: Distribution<F>,
         PD: Distribution<F>,
         VD: Distribution<F>,
     {
@@ -47,16 +46,15 @@ mod random {
         charge_distr: CD,
         position_distr: PD,
         velocity_distr: VD,
-        phantom: PhantomData<(F, C, P)>,
+        phantom: PhantomData<(F, P)>,
     }
 
-    impl<F, C, P, PD, VD, MD, CD> DistrParticleCreator<F, C, P, MD, CD, PD, VD>
+    impl<F, P, PD, VD, MD, CD> DistrParticleCreator<F, P, MD, CD, PD, VD>
     where
         F: RealField + Copy,
-        C: Charge,
-        P: Particle<F, C>,
+        P: SamplableParticle<F>,
         MD: Distribution<F>,
-        CD: Distribution<C>,
+        CD: Distribution<F>,
         PD: Distribution<F>,
         VD: Distribution<F>,
     {
@@ -77,14 +75,12 @@ mod random {
         }
     }
 
-    impl<F, C, P, PD, VD, MD, CD> ParticleCreator<F, C, P>
-        for DistrParticleCreator<F, C, P, MD, CD, PD, VD>
+    impl<F, P, PD, VD, MD, CD> ParticleCreator<F, P> for DistrParticleCreator<F, P, MD, CD, PD, VD>
     where
         F: RealField + Copy,
-        C: Charge,
-        P: Particle<F, C>,
+        P: SamplableParticle<F>,
         MD: Distribution<F>,
-        CD: Distribution<C>,
+        CD: Distribution<F>,
         PD: Distribution<F>,
         VD: Distribution<F>,
     {
@@ -104,7 +100,7 @@ mod random {
 
             P::particle(
                 self.mass_distr.sample(rng),
-                self.charge_distr.sample(rng),
+                P::SamplableCharge::sample(&self.charge_distr, rng),
                 pos,
                 vel,
             )
@@ -114,7 +110,6 @@ mod random {
     #[derive(Clone)]
     pub struct CentralBodyParticleCreator<F, MD, RD>
     where
-        F: RealField + Copy,
         MD: Distribution<F>,
         RD: Distribution<F>,
     {
@@ -142,10 +137,10 @@ mod random {
         }
     }
 
-    impl<F, MD, RD> ParticleCreator<F, F, GravitationalParticle<F>>
+    impl<F, MD, RD> ParticleCreator<F, GravitationalParticle<F>>
         for CentralBodyParticleCreator<F, MD, RD>
     where
-        F: RealField + SampleUniform + Copy,
+        F: RealField + SampleUniform + Copy + Mul<Vector3<F>, Output = Vector3<F>>,
         MD: Distribution<F>,
         RD: Distribution<F>,
     {

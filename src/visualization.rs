@@ -1,32 +1,23 @@
 use std::time::Instant;
 
-use crate::{
-    acceleration::Acceleration,
-    particle::{Charge, Particle},
-    particle_creator::ParticleCreator,
-    BarnesHut, Step,
-};
+use crate::{interaction::Particle, particle_creator::ParticleCreator, BarnesHut, Step};
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
 use nalgebra::{RealField, Vector3};
 
 /// Visualize the Barnes-Hut algorithm.
-pub struct Visualizer<F, C, A, P>
+pub struct Visualizer<F, P>
 where
     F: RealField + Copy,
-    C: Charge + 'static,
-    A: Acceleration<F, C> + 'static,
-    P: Particle<F, C> + 'static,
+    P: Particle<F> + 'static,
 {
     engine: Engine,
-    barnes_hut: BarnesHut<F, C, A, P, Vec<P>>,
+    barnes_hut: BarnesHut<F, P, Vec<P>>,
 }
 
-impl<F, C, A, P> Visualizer<F, C, A, P>
+impl<F, P> Visualizer<F, P>
 where
     F: RealField + Copy,
-    C: Charge + 'static,
-    A: Acceleration<F, C> + 'static,
-    P: Particle<F, C> + 'static,
+    P: Particle<F> + 'static,
 {
     /// Create a new visualizer.
     ///
@@ -35,7 +26,7 @@ where
     /// - `width`: Width of the window.
     /// - `height`: Height of the window.
     pub fn new(
-        barnes_hut: BarnesHut<F, C, A, P, Vec<P>>,
+        barnes_hut: BarnesHut<F, P, Vec<P>>,
         width: u32,
         height: u32,
     ) -> anyhow::Result<Self> {
@@ -57,10 +48,10 @@ where
         Ok(Self { engine, barnes_hut })
     }
 
-    pub fn from_particle_creator<Pc: ParticleCreator<F, C, P>>(
+    pub fn from_particle_creator<Pc: ParticleCreator<F, P>>(
         mut particle_creator: Pc,
         num_particles: u32,
-        acceleration: A,
+        acceleration: P::Acceleration,
         width: u32,
         height: u32,
     ) -> anyhow::Result<Self> {

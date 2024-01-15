@@ -2,14 +2,56 @@ use std::ops::Mul;
 
 use nalgebra::{RealField, Vector3};
 
-use crate::{acceleration::Acceleration, octree::PointCharge, particle::Particle};
+use crate::{
+    charge_wrapper, interaction::Acceleration, interaction::Particle, octree::PointCharge,
+    samplable_charge_wrapper,
+};
 
 pub const G: f64 = 6.6743015e-11;
+
+charge_wrapper!(Mass);
+samplable_charge_wrapper!(Mass);
+
+/// The gravitational force, using a smoothing parameter to lessen the singularity.
+#[derive(Clone, Debug)]
+pub struct GravitationalAcceleration<F: RealField + Copy>
+where
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
+{
+    epsilon: F,
+}
+
+impl<F: RealField + Copy> GravitationalAcceleration<F>
+where
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
+{
+    pub fn new(epsilon: F) -> Self {
+        Self { epsilon }
+    }
+}
+
+impl<F: RealField + Copy> Acceleration<F> for GravitationalAcceleration<F>
+where
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
+{
+    type Charge = Mass<F>;
+    type Particle = GravitationalParticle<F>;
+
+    fn eval(
+        &self,
+        particle1: &PointCharge<F, Mass<F>>,
+        particle2: &PointCharge<F, Mass<F>>,
+    ) -> Vector3<F> {
+        let r = particle2.position - particle1.position;
+        let r_square = r.norm_squared();
+        r * F::from_f64(G).unwrap() * particle2.mass / (r_square + self.epsilon).sqrt().powi(3)
+    }
+}
 
 /// A point mass, i.e. charge = mass.
 #[derive(Clone, Debug)]
 pub struct GravitationalParticle<F: RealField + Copy> {
-    point_charge: PointCharge<F, F>,
+    point_charge: PointCharge<F, Mass<F>>,
     velocity: Vector3<F>,
 }
 
@@ -19,29 +61,28 @@ where
 {
     pub fn new(mass: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self {
-            point_charge: PointCharge {
-                mass,
-                charge: mass,
-                position,
-            },
+            point_charge: PointCharge::new(mass, Mass(mass), position),
             velocity,
         }
     }
 }
 
-impl<F: RealField + Copy> Particle<F, F> for GravitationalParticle<F>
+impl<F: RealField + Copy> Particle<F> for GravitationalParticle<F>
 where
     Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
-    fn particle(mass: F, _charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
+    type Charge = Mass<F>;
+    type Acceleration = GravitationalAcceleration<F>;
+
+    fn particle(mass: F, _charge: Mass<F>, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self::new(mass, position, velocity)
     }
 
-    fn point_charge(&self) -> &PointCharge<F, F> {
+    fn point_charge(&self) -> &PointCharge<F, Mass<F>> {
         &self.point_charge
     }
 
-    fn point_charge_mut(&mut self) -> &mut PointCharge<F, F> {
+    fn point_charge_mut(&mut self) -> &mut PointCharge<F, Mass<F>> {
         &mut self.point_charge
     }
 
@@ -53,11 +94,11 @@ where
         self.charge_mut()
     }
 
-    fn charge(&self) -> &F {
+    fn charge(&self) -> &Mass<F> {
         &self.point_charge.charge
     }
 
-    fn charge_mut(&mut self) -> &mut F {
+    fn charge_mut(&mut self) -> &mut Mass<F> {
         &mut self.point_charge.charge
     }
 
@@ -79,47 +120,18 @@ where
 
     fn center_of_charge_and_mass(
         _mass_acc: F,
-        charge_acc: F,
+        charge_acc: Mass<F>,
         position_acc: Vector3<F>,
         _mass: F,
-        charge: &F,
+        charge: &Mass<F>,
         position: &Vector3<F>,
-    ) -> (F, F, Vector3<F>) {
-        let charge_sum = charge_acc + *charge;
+    ) -> (F, Mass<F>, Vector3<F>) {
+        let charge_sum = *charge_acc + **charge;
         (
             charge_sum,
-            charge_sum,
-            (position_acc * charge_acc + *position * *charge) / charge_sum,
+            Mass(charge_sum),
+            (position_acc * *charge_acc + *position * **charge) / charge_sum,
         )
-    }
-}
-
-/// The gravitational force, using a smoothing parameter to lessen the singularity.
-#[derive(Clone, Debug)]
-pub struct GravitationalAcceleration<F: RealField + Copy>
-where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
-{
-    epsilon: F,
-}
-
-impl<F: RealField + Copy> GravitationalAcceleration<F>
-where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
-{
-    pub fn new(epsilon: F) -> Self {
-        Self { epsilon }
-    }
-}
-
-impl<F: RealField + Copy> Acceleration<F, F> for GravitationalAcceleration<F>
-where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
-{
-    fn eval(&self, particle1: &PointCharge<F, F>, particle2: &PointCharge<F, F>) -> Vector3<F> {
-        let r = particle2.position - particle1.position;
-        let r_square = r.norm_squared();
-        F::from_f64(G).unwrap() * particle2.mass / (r_square + self.epsilon).sqrt().powi(3) * r
     }
 }
 

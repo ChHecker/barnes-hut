@@ -2,10 +2,57 @@ use std::ops::Mul;
 
 use nalgebra::{RealField, Vector3};
 
-use crate::{acceleration::Acceleration, octree::PointCharge, particle::Particle};
+use crate::{
+    charge_wrapper,
+    interaction::{Acceleration, Particle},
+    octree::PointCharge,
+    samplable_charge_wrapper,
+};
 
 const K: f64 = 8.99e09;
 pub const E: f64 = 1.60217663e-19;
+
+charge_wrapper!(ElectricalCharge);
+samplable_charge_wrapper!(ElectricalCharge);
+
+/// The Coulomb force, using a smoothing parameter to lessen the singularity.
+#[derive(Clone, Debug)]
+pub struct CoulombAcceleration<F: RealField + Copy>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    epsilon: F,
+}
+
+impl<F: RealField + Copy> CoulombAcceleration<F>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    pub fn new(epsilon: F) -> Self {
+        Self { epsilon }
+    }
+}
+
+impl<F: RealField + Copy> Acceleration<F> for CoulombAcceleration<F>
+where
+    F: Mul<Vector3<F>, Output = Vector3<F>>,
+{
+    type Charge = ElectricalCharge<F>;
+    type Particle = CoulombParticle<F>;
+
+    fn eval(
+        &self,
+        particle1: &PointCharge<F, ElectricalCharge<F>>,
+        particle2: &PointCharge<F, ElectricalCharge<F>>,
+    ) -> Vector3<F> {
+        let r = particle1.position - particle2.position;
+        let r_square = r.norm_squared();
+        F::from_f64(K).unwrap() * *particle1.charge * *particle2.charge
+            / particle1.mass
+            / (r_square + self.epsilon).sqrt().powi(3)
+            * r
+    }
+}
 
 /// An electrical point charge.
 #[derive(Clone, Debug)]
@@ -13,7 +60,7 @@ pub struct CoulombParticle<F: RealField + Copy>
 where
     F: Mul<Vector3<F>, Output = Vector3<F>>,
 {
-    point_charge: PointCharge<F, F>,
+    point_charge: PointCharge<F, ElectricalCharge<F>>,
     velocity: Vector3<F>,
 }
 
@@ -23,29 +70,36 @@ where
 {
     pub fn new(mass: F, charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
         Self {
-            point_charge: PointCharge {
-                mass,
-                charge,
-                position,
-            },
+            point_charge: PointCharge::new(mass, ElectricalCharge(charge), position),
             velocity,
         }
     }
 }
 
-impl<F: RealField + Copy> Particle<F, F> for CoulombParticle<F>
+impl<F: RealField + Copy> Particle<F> for CoulombParticle<F>
 where
     F: Mul<Vector3<F>, Output = Vector3<F>>,
 {
-    fn particle(mass: F, charge: F, position: Vector3<F>, velocity: Vector3<F>) -> Self {
-        Self::new(mass, charge, position, velocity)
+    type Charge = ElectricalCharge<F>;
+    type Acceleration = CoulombAcceleration<F>;
+
+    fn particle(
+        mass: F,
+        charge: ElectricalCharge<F>,
+        position: Vector3<F>,
+        velocity: Vector3<F>,
+    ) -> Self {
+        Self {
+            point_charge: PointCharge::new(mass, charge, position),
+            velocity,
+        }
     }
 
-    fn point_charge(&self) -> &PointCharge<F, F> {
+    fn point_charge(&self) -> &PointCharge<F, ElectricalCharge<F>> {
         &self.point_charge
     }
 
-    fn point_charge_mut(&mut self) -> &mut PointCharge<F, F> {
+    fn point_charge_mut(&mut self) -> &mut PointCharge<F, ElectricalCharge<F>> {
         &mut self.point_charge
     }
 
@@ -57,11 +111,11 @@ where
         &mut self.point_charge.mass
     }
 
-    fn charge(&self) -> &F {
+    fn charge(&self) -> &ElectricalCharge<F> {
         &self.point_charge.charge
     }
 
-    fn charge_mut(&mut self) -> &mut F {
+    fn charge_mut(&mut self) -> &mut ElectricalCharge<F> {
         &mut self.point_charge.charge
     }
 
@@ -83,49 +137,17 @@ where
 
     fn center_of_charge_and_mass(
         mass_acc: F,
-        charge_acc: F,
+        charge_acc: ElectricalCharge<F>,
         position_acc: Vector3<F>,
         mass: F,
-        charge: &F,
+        charge: &ElectricalCharge<F>,
         position: &Vector3<F>,
-    ) -> (F, F, Vector3<F>) {
+    ) -> (F, ElectricalCharge<F>, Vector3<F>) {
         (
             mass_acc + mass,
-            charge_acc + *charge,
-            (charge_acc * position_acc + *charge * *position) / (charge_acc + *charge),
+            ElectricalCharge(*charge_acc + **charge),
+            (*charge_acc * position_acc + **charge * *position) / (*charge_acc + **charge),
         )
-    }
-}
-
-/// The gravitational force, using a smoothing parameter to lessen the singularity.
-#[derive(Clone, Debug)]
-pub struct CoulombAcceleration<F: RealField + Copy>
-where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
-{
-    epsilon: F,
-}
-
-impl<F: RealField + Copy> CoulombAcceleration<F>
-where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
-{
-    pub fn new(epsilon: F) -> Self {
-        Self { epsilon }
-    }
-}
-
-impl<F: RealField + Copy> Acceleration<F, F> for CoulombAcceleration<F>
-where
-    F: Mul<Vector3<F>, Output = Vector3<F>>,
-{
-    fn eval(&self, particle1: &PointCharge<F, F>, particle2: &PointCharge<F, F>) -> Vector3<F> {
-        let r = particle1.position - particle2.position;
-        let r_square = r.norm_squared();
-        F::from_f64(K).unwrap() * particle1.charge * particle2.charge
-            / particle1.mass
-            / (r_square + self.epsilon).sqrt().powi(3)
-            * r
     }
 }
 

@@ -1,8 +1,7 @@
-pub mod acceleration;
 pub mod coulomb;
 pub mod gravity;
+pub mod interaction;
 pub mod octree;
-pub mod particle;
 pub mod particle_creator;
 #[cfg(feature = "visualization")]
 pub mod visualization;
@@ -13,9 +12,8 @@ mod csv;
 use std::marker::PhantomData;
 
 use crate::octree::Octree;
-use acceleration::Acceleration;
+use interaction::Particle;
 use nalgebra::{DMatrix, RealField, Vector3};
-use particle::{Charge, Particle};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
@@ -70,29 +68,25 @@ impl Step {
 /// );
 /// ```
 #[derive(Debug)]
-pub struct BarnesHut<F, C, A, P, Q>
+pub struct BarnesHut<F, P, Q>
 where
     F: RealField + Copy,
-    C: Charge,
-    A: Acceleration<F, C>,
-    P: Particle<F, C>,
+    P: Particle<F>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
     particles: Q,
-    acceleration: A,
+    acceleration: P::Acceleration,
     execution: Execution,
-    phantom: PhantomData<(F, C, P)>,
+    phantom: PhantomData<P>,
 }
 
-impl<F, A, C, P, Q> BarnesHut<F, C, A, P, Q>
+impl<F, P, Q> BarnesHut<F, P, Q>
 where
     F: RealField + Copy,
-    C: Charge,
-    A: Acceleration<F, C>,
-    P: Particle<F, C>,
+    P: Particle<F>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
-    pub fn new(particles: Q, acceleration: A) -> Self {
+    pub fn new(particles: Q, acceleration: P::Acceleration) -> Self {
         Self {
             particles,
             acceleration,

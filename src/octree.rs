@@ -1,9 +1,6 @@
 use nalgebra::{RealField, Vector3};
 
-use crate::{
-    acceleration::Acceleration,
-    particle::{Charge, Particle},
-};
+use crate::interaction::{Acceleration, Charge, Particle};
 
 #[cfg(debug_assertions)]
 macro_rules! unreachable_debug {
@@ -20,26 +17,22 @@ macro_rules! unreachable_debug {
 }
 
 #[derive(Clone, Debug)]
-pub struct Octree<'a, F, C, A, P>
+pub struct Octree<'a, F, P>
 where
     F: RealField + Copy,
-    C: Charge,
-    A: Acceleration<F, C>,
-    P: Particle<F, C>,
+    P: Particle<F>,
 {
-    root: Node<'a, F, C, P>,
+    root: Node<'a, F, P>,
     theta: F,
-    acceleration: &'a A,
+    acceleration: &'a P::Acceleration,
 }
 
-impl<'a, F, C, A, P> Octree<'a, F, C, A, P>
+impl<'a, F, P> Octree<'a, F, P>
 where
     F: RealField + Copy,
-    C: Charge,
-    A: Acceleration<F, C>,
-    P: Particle<F, C>,
+    P: Particle<F>,
 {
-    pub fn new(particles: &'a [P], theta: F, acceleration: &'a A) -> Self {
+    pub fn new(particles: &'a [P], theta: F, acceleration: &'a P::Acceleration) -> Self {
         Self {
             root: Node::from_particles(particles),
             theta,
@@ -67,38 +60,49 @@ where
     pub position: Vector3<F>,
 }
 
-#[derive(Clone, Debug)]
-enum OptionalCharge<'a, F, C, P>
+impl<F, C> PointCharge<F, C>
 where
     F: RealField + Copy,
     C: Charge,
-    P: Particle<F, C>,
 {
-    Point(PointCharge<F, C>),
+    pub fn new(mass: F, charge: C, position: Vector3<F>) -> Self {
+        Self {
+            mass,
+            charge,
+            position,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum OptionalCharge<'a, F, P>
+where
+    F: RealField + Copy,
+    P: Particle<F>,
+{
+    Point(PointCharge<F, P::Charge>),
     Particle(&'a P),
     None,
 }
 
-type Subnodes<'a, F, C, P> = [Option<Node<'a, F, C, P>>; 8];
+type Subnodes<'a, F, P> = [Option<Node<'a, F, P>>; 8];
 
 #[derive(Clone, Debug)]
-struct Node<'a, F, C, P>
+struct Node<'a, F, P>
 where
     F: RealField + Copy,
-    C: Charge,
-    P: Particle<F, C>,
+    P: Particle<F>,
 {
-    subnodes: Option<Box<Subnodes<'a, F, C, P>>>,
-    charge: OptionalCharge<'a, F, C, P>,
+    subnodes: Option<Box<Subnodes<'a, F, P>>>,
+    charge: OptionalCharge<'a, F, P>,
     center: Vector3<F>,
     width: F,
 }
 
-impl<'a, F, C, P> Node<'a, F, C, P>
+impl<'a, F, P> Node<'a, F, P>
 where
     F: RealField + Copy,
-    C: Charge,
-    P: Particle<F, C>,
+    P: Particle<F>,
 {
     fn new(center: Vector3<F>, width: F) -> Self {
         Self {
@@ -173,7 +177,7 @@ where
     }
 
     fn insert_particle_subdivide(&mut self, previous_particle: &'a P, new_particle: &'a P) {
-        let mut new_nodes: Subnodes<'a, F, C, P> = Default::default();
+        let mut new_nodes: Subnodes<'a, F, P> = Default::default();
 
         // Create subnode for previous particle
         let previous_index = Self::choose_subnode(&self.center, previous_particle.position());
@@ -223,24 +227,22 @@ where
                     OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
-                    (F::zero(), C::identity(), Vector3::zeros()),
+                    (F::zero(), P::Charge::identity(), Vector3::zeros()),
                     |(m_acc, c_acc, pos_acc), (&m, c, pos)| {
                         P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, c, pos)
                     },
                 );
 
-            self.charge = OptionalCharge::Point(PointCharge {
-                mass,
-                charge,
-                position: center_of_charge,
-            });
+            self.charge = OptionalCharge::Point(PointCharge::new(mass, charge, center_of_charge));
         }
     }
 
     fn calculate_acceleration(
         &self,
         particle: &P,
-        acceleration_fn: &(impl Fn(&PointCharge<F, C>, &PointCharge<F, C>) -> Vector3<F> + Send + Sync),
+        acceleration_fn: &(impl Fn(&PointCharge<F, P::Charge>, &PointCharge<F, P::Charge>) -> Vector3<F>
+              + Send
+              + Sync),
         theta: F,
     ) -> Vector3<F> {
         let mut acc = Vector3::zeros();
