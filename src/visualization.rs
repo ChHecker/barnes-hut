@@ -1,13 +1,13 @@
 use std::time::Instant;
 
-use crate::{interaction::Particle, particle_creator::ParticleCreator, BarnesHut, Step};
+use crate::{interaction::Particle, particle_creator::ParticleCreator, BarnesHut, Float, Step};
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
-use nalgebra::{RealField, Vector3};
+use nalgebra::Vector3;
 
 /// Visualize the Barnes-Hut algorithm.
 pub struct Visualizer<F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F> + 'static,
 {
     engine: Engine,
@@ -16,7 +16,7 @@ where
 
 impl<F, P> Visualizer<F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F> + 'static,
 {
     /// Create a new visualizer.

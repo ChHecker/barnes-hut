@@ -190,6 +190,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "rayon",
+ "simba",
 ]
 
 [[package]]

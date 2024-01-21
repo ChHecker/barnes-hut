@@ -1,6 +1,11 @@
-use nalgebra::{RealField, Vector3};
+use std::{marker::PhantomData, ops::Deref};
 
-use crate::interaction::{Acceleration, Charge, Particle};
+use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue, Vector3};
+
+use crate::{
+    interaction::{Acceleration, Charge, Particle},
+    Float, ToSimd,
+};
 
 #[cfg(debug_assertions)]
 macro_rules! unreachable_debug {
@@ -19,7 +24,7 @@ macro_rules! unreachable_debug {
 #[derive(Clone, Debug)]
 pub struct Octree<'a, F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
 {
     root: Node<'a, F, P>,
@@ -29,7 +34,7 @@ where
 
 impl<'a, F, P> Octree<'a, F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
 {
     pub fn new(particles: &'a [P], theta: F, acceleration: &'a P::Acceleration) -> Self {
@@ -41,31 +46,26 @@ where
     }
 
     pub fn calculate_acceleration(&self, particle: &P) -> Vector3<F> {
-        self.root.calculate_acceleration(
-            particle,
-            &|p1, p2| self.acceleration.eval(p1, p2),
-            self.theta,
-        )
+        self.root
+            .calculate_acceleration(particle, self.acceleration, self.theta)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct PointCharge<F, C>
+pub struct PointCharge<S, C>
 where
-    F: RealField + Copy,
-    C: Charge,
+    S: SimdRealField,
 {
-    pub mass: F,
+    pub mass: S,
     pub charge: C,
-    pub position: Vector3<F>,
+    pub position: Vector3<S>,
 }
 
-impl<F, C> PointCharge<F, C>
+impl<S, C> PointCharge<S, C>
 where
-    F: RealField + Copy,
-    C: Charge,
+    S: SimdRealField,
 {
-    pub fn new(mass: F, charge: C, position: Vector3<F>) -> Self {
+    pub fn new(mass: S, charge: C, position: Vector3<S>) -> Self {
         Self {
             mass,
             charge,
@@ -75,14 +75,125 @@ where
 }
 
 #[derive(Clone, Debug)]
-enum OptionalCharge<'a, F, P>
+struct ParticleArray<'a, F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
 {
+    arr: [Option<&'a P>; 4],
+    len: usize,
+    phantom: PhantomData<F>,
+}
+
+impl<'a, F, P> ParticleArray<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    fn from_particle(particle: &'a P) -> Self {
+        let mut arr: [Option<&'a P>; 4] = [None; 4];
+        arr[0] = Some(particle);
+        Self {
+            arr,
+            len: 1,
+            phantom: PhantomData,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn push(&mut self, value: &'a P) -> bool {
+        if self.len >= 4 {
+            return false;
+        }
+
+        self.arr[self.len() - 1] = Some(value);
+        self.len += 1;
+
+        true
+    }
+
+    fn center_of_charge_and_mass(&self) -> (F, P::Charge, Vector3<F>) {
+        self.iter()
+            .filter_map(|par| *par)
+            .map(|par| (par.mass(), par.charge(), par.position()))
+            .fold(
+                (F::zero(), P::Charge::identity(), Vector3::zeros()),
+                |(m_acc, c_acc, pos_acc), (&m, c, pos)| {
+                    P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, c, pos)
+                },
+            )
+    }
+
+    fn point_charge_simd(
+        &self,
+    ) -> PointCharge<F::Simd, <<P as Particle<F>>::Charge as Charge>::Simd> {
+        let mut mass = [F::zero(); 4];
+        let mut charge = [P::Charge::identity(); 4];
+        let mut position: Vector3<F::Simd> = Vector3::zeros();
+
+        for (i, par) in self.arr.iter().flatten().enumerate() {
+            let pc = par.point_charge();
+            mass[i] = pc.mass;
+            charge[i] = pc.charge;
+            for (j, pos) in pc.position.iter().enumerate() {
+                position[j].replace(i, *pos);
+            }
+        }
+        PointCharge::new(mass.into(), charge.into(), position)
+    }
+}
+
+impl<'a, F, P> Default for ParticleArray<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    fn default() -> Self {
+        let arr: [Option<&'a P>; 4] = [None; 4];
+        Self {
+            arr,
+            len: 0,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, F, P> Deref for ParticleArray<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    type Target = [Option<&'a P>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.arr[0..self.len]
+    }
+}
+
+#[derive(Clone, Debug)]
+enum OptionalCharge<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    Particle(ParticleArray<'a, F, P>),
     Point(PointCharge<F, P::Charge>),
-    Particle(&'a P),
     None,
+}
+
+impl<'a, F, P> OptionalCharge<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    fn take(&mut self) -> Self {
+        let mut ret = OptionalCharge::None;
+        std::mem::swap(&mut ret, self);
+        ret
+    }
 }
 
 type Subnodes<'a, F, P> = [Option<Node<'a, F, P>>; 8];
@@ -90,7 +201,7 @@ type Subnodes<'a, F, P> = [Option<Node<'a, F, P>>; 8];
 #[derive(Clone, Debug)]
 struct Node<'a, F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
 {
     subnodes: Option<Box<Subnodes<'a, F, P>>>,
@@ -101,7 +212,7 @@ where
 
 impl<'a, F, P> Node<'a, F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
 {
     fn new(center: Vector3<F>, width: F) -> Self {
@@ -158,10 +269,10 @@ where
             }
 
             // Self is outer node
-            None => match self.charge {
+            None => match &self.charge {
                 // Self contains a particle, subdivide
-                OptionalCharge::Particle(previous_particle) => {
-                    self.insert_particle_subdivide(previous_particle, particle);
+                OptionalCharge::Particle(_) => {
+                    self.insert_particle_subdivide(particle);
                 }
 
                 OptionalCharge::Point(_) => {
@@ -170,48 +281,38 @@ where
 
                 // Self doesn't contain a particle, add mass of particle
                 OptionalCharge::None => {
-                    self.charge = OptionalCharge::Particle(particle);
+                    self.charge = OptionalCharge::Particle(ParticleArray::from_particle(particle));
                 }
             },
         }
     }
 
-    fn insert_particle_subdivide(&mut self, previous_particle: &'a P, new_particle: &'a P) {
-        let mut new_nodes: Subnodes<'a, F, P> = Default::default();
+    fn insert_particle_subdivide(&mut self, new_particle: &'a P) {
+        if let OptionalCharge::Particle(previous_particles) = &mut self.charge {
+            if previous_particles.push(new_particle) {
+                return;
+            }
+        }
 
-        // Create subnode for previous particle
-        let previous_index = Self::choose_subnode(&self.center, previous_particle.position());
-        let mut previous_node = Node::new(
-            self.center_from_subnode(previous_index),
-            self.width / F::from_f64(2.).unwrap(),
-        );
+        if let OptionalCharge::Particle(previous_particles) = self.charge.take() {
+            let mut new_nodes: Subnodes<'a, F, P> = Default::default();
 
-        let new_index = Self::choose_subnode(&self.center, new_particle.position());
-        // If previous and new particle belong in separate nodes, particles can be trivially inserted
-        // (self.insert_particle would crash because one node wouldn't have a mass yet)
-        // Otherwise, call insert on self below so self can be subdivided again
-        if new_index != previous_index {
+            let new_index = Self::choose_subnode(&self.center, new_particle.position());
             let mut new_node = Node::new(
                 self.center_from_subnode(new_index),
                 self.width / F::from_f64(2.).unwrap(),
             );
             // Insert new particle
-            new_node.charge = OptionalCharge::Particle(new_particle);
+            new_node.charge = OptionalCharge::Particle(ParticleArray::from_particle(new_particle));
             new_nodes[new_index] = Some(new_node);
 
-            // Insert previous particle
-            previous_node.charge = OptionalCharge::Particle(previous_particle);
-        }
-        new_nodes[previous_index] = Some(previous_node);
+            self.subnodes = Some(Box::new(new_nodes));
 
-        self.subnodes = Some(Box::new(new_nodes));
-
-        // If particles belong in the same cell, call insert on self so self can be subdivided again
-        if previous_index == new_index {
-            self.insert_particle(previous_particle);
-            self.insert_particle(new_particle);
+            for particle in previous_particles.iter().flatten() {
+                self.insert_particle(particle);
+            }
+            self.calculate_charge();
         }
-        self.calculate_charge();
     }
 
     fn calculate_charge(&mut self) {
@@ -220,16 +321,14 @@ where
                 .iter_mut()
                 .filter_map(|node| node.as_mut())
                 .map(|node| match &node.charge {
-                    OptionalCharge::Point(charge) => {
-                        (&charge.mass, &charge.charge, &charge.position)
-                    }
-                    OptionalCharge::Particle(par) => (par.mass(), par.charge(), par.position()),
+                    OptionalCharge::Point(charge) => (charge.mass, charge.charge, charge.position),
+                    OptionalCharge::Particle(par) => par.center_of_charge_and_mass(),
                     OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
                     (F::zero(), P::Charge::identity(), Vector3::zeros()),
-                    |(m_acc, c_acc, pos_acc), (&m, c, pos)| {
-                        P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, c, pos)
+                    |(m_acc, c_acc, pos_acc), (m, c, pos)| {
+                        P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, &c, &pos)
                     },
                 );
 
@@ -240,9 +339,7 @@ where
     fn calculate_acceleration(
         &self,
         particle: &P,
-        acceleration_fn: &(impl Fn(&PointCharge<F, P::Charge>, &PointCharge<F, P::Charge>) -> Vector3<F>
-              + Send
-              + Sync),
+        acceleration: &P::Acceleration,
         theta: F,
     ) -> Vector3<F> {
         let mut acc = Vector3::zeros();
@@ -257,7 +354,7 @@ where
 
                 if self.width / r.norm() < theta {
                     // leaf nodes or node is far enough away
-                    acc += acceleration_fn(particle.point_charge(), charge);
+                    acc += acceleration.eval(particle.point_charge(), charge);
                 } else {
                     // near field forces, go deeper into tree
                     for node in self
@@ -266,17 +363,25 @@ where
                         .expect("node has neither particle nor subnodes")
                     {
                         if let Some(node) = &node {
-                            acc += node.calculate_acceleration(particle, acceleration_fn, theta);
+                            acc += node.calculate_acceleration(particle, acceleration, theta);
                         }
                     }
                 }
             }
             OptionalCharge::Particle(particle2) => {
-                if particle.position() == particle2.position() {
-                    return acc;
-                }
+                let pars = particle2.point_charge_simd();
+                let same: <<F as ToSimd>::Simd as SimdValue>::SimdBool = pars
+                    .position
+                    .iter()
+                    .zip(particle.position().iter())
+                    .map(|(p2, p1)| p2.clone().simd_eq(F::Simd::splat(*p1)))
+                    .reduce(|x, y| x & y)
+                    .unwrap();
 
-                acc += acceleration_fn(particle.point_charge(), particle2.point_charge())
+                acc += acceleration
+                    .eval_simd(particle.point_charge(), &pars)
+                    .map(|elem| same.if_else(|| F::Simd::splat(F::zero()), || elem))
+                    .map(|elem| elem.simd_horizontal_sum());
             }
             OptionalCharge::None => {
                 unreachable_debug!("nodes without a charge or particle shouldn't exist")

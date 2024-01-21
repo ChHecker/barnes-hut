@@ -1,10 +1,8 @@
-use nalgebra::RealField;
-
-use crate::interaction::Particle;
+use crate::{interaction::Particle, Float};
 
 pub trait ParticleCreator<F, P>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
 {
     fn create_particle(&mut self) -> P;
@@ -34,7 +32,7 @@ mod random {
     #[derive(Clone)]
     pub struct DistrParticleCreator<F, P, MD, CD, PD, VD>
     where
-        F: RealField + Copy,
+        F: Float,
         P: SamplableParticle<F>,
         MD: Distribution<F>,
         CD: Distribution<F>,
@@ -51,7 +49,7 @@ mod random {
 
     impl<F, P, PD, VD, MD, CD> DistrParticleCreator<F, P, MD, CD, PD, VD>
     where
-        F: RealField + Copy,
+        F: Float,
         P: SamplableParticle<F>,
         MD: Distribution<F>,
         CD: Distribution<F>,
@@ -77,7 +75,7 @@ mod random {
 
     impl<F, P, PD, VD, MD, CD> ParticleCreator<F, P> for DistrParticleCreator<F, P, MD, CD, PD, VD>
     where
-        F: RealField + Copy,
+        F: Float,
         P: SamplableParticle<F>,
         MD: Distribution<F>,
         CD: Distribution<F>,
@@ -122,7 +120,7 @@ mod random {
 
     impl<F, MD, RD> CentralBodyParticleCreator<F, MD, RD>
     where
-        F: RealField + Copy,
+        F: Float,
         MD: Distribution<F>,
         RD: Distribution<F>,
     {
@@ -140,7 +138,7 @@ mod random {
     impl<F, MD, RD> ParticleCreator<F, GravitationalParticle<F>>
         for CentralBodyParticleCreator<F, MD, RD>
     where
-        F: RealField + SampleUniform + Copy + Mul<Vector3<F>, Output = Vector3<F>>,
+        F: Float + SampleUniform + Mul<Vector3<F>, Output = Vector3<F>>,
         MD: Distribution<F>,
         RD: Distribution<F>,
     {

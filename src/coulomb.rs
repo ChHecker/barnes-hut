@@ -1,10 +1,11 @@
 use std::ops::Mul;
 
-use nalgebra::{RealField, Vector3};
+use nalgebra::{SimdComplexField, SimdValue, Vector3};
 
 use crate::{
     interaction::{Acceleration, Particle},
     octree::PointCharge,
+    Float,
 };
 
 const K: f64 = 8.99e09;
@@ -12,14 +13,14 @@ pub const E: f64 = 1.60217663e-19;
 
 /// The Coulomb force, using a smoothing parameter to lessen the singularity.
 #[derive(Clone, Debug)]
-pub struct CoulombAcceleration<F: RealField + Copy>
+pub struct CoulombAcceleration<F: Float>
 where
     Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
     epsilon: F,
 }
 
-impl<F: RealField + Copy> CoulombAcceleration<F>
+impl<F: Float> CoulombAcceleration<F>
 where
     Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
@@ -28,25 +29,46 @@ where
     }
 }
 
-impl<F: RealField + Copy> Acceleration<F> for CoulombAcceleration<F>
+impl<F: Float> Acceleration<F> for CoulombAcceleration<F>
 where
-    Vector3<F>: Mul<F, Output = Vector3<F>>,
+    Vector3<F::Simd>: Mul<F::Simd, Output = Vector3<F::Simd>>,
 {
     type Charge = F;
     type Particle = CoulombParticle<F>;
 
-    fn eval(&self, particle1: &PointCharge<F, F>, particle2: &PointCharge<F, F>) -> Vector3<F> {
+    fn eval(
+        &self,
+        particle1: &PointCharge<F, Self::Charge>,
+        particle2: &PointCharge<F, Self::Charge>,
+    ) -> Vector3<F> {
         let r = particle1.position - particle2.position;
         let r_square = r.norm_squared();
-        r * F::from_f64(K).unwrap() * particle1.charge * particle2.charge
+        r * F::from_f64(K).unwrap() * (particle1.charge) * particle2.charge
             / particle1.mass
             / (r_square + self.epsilon).sqrt().powi(3)
+    }
+
+    fn eval_simd(
+        &self,
+        particle1: &PointCharge<F, F>,
+        particle2: &PointCharge<F::Simd, F::Simd>,
+    ) -> Vector3<F::Simd> {
+        let pos = Vector3::splat(particle1.position);
+        let r = pos - &particle2.position;
+        let r_square = r.norm_squared();
+        r * F::Simd::splat(F::from_f64(K).unwrap())
+            * F::Simd::splat(particle1.charge)
+            * particle2.charge.clone()
+            / F::Simd::splat(particle1.mass)
+            / (r_square + F::Simd::splat(self.epsilon))
+                .simd_sqrt()
+                .simd_powi(3)
     }
 }
 
 /// An electrical point charge.
 #[derive(Clone, Debug)]
-pub struct CoulombParticle<F: RealField + Copy>
+pub struct CoulombParticle<F: Float>
 where
     Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
@@ -54,7 +76,7 @@ where
     velocity: Vector3<F>,
 }
 
-impl<F: RealField + Copy> CoulombParticle<F>
+impl<F: Float> CoulombParticle<F>
 where
     Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
@@ -66,7 +88,7 @@ where
     }
 }
 
-impl<F: RealField + Copy> Particle<F> for CoulombParticle<F>
+impl<F: Float> Particle<F> for CoulombParticle<F>
 where
     Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
@@ -147,13 +169,14 @@ mod tests {
 
     #[test]
     fn test_acceleration() {
-        let par1 = CoulombParticle::new(1., 10e-6, Vector3::new(1., 0., 0.), Vector3::zeros());
-        let par2 = CoulombParticle::new(1., -10e-6, Vector3::new(-1., 0., 0.), Vector3::zeros());
+        todo!()
+        // let par1 = CoulombParticle::new(1., 10e-6, Vector3::new(1., 0., 0.), Vector3::zeros());
+        // let par2 = CoulombParticle::new(1., -10e-6, Vector3::new(-1., 0., 0.), Vector3::zeros());
 
-        let acc = CoulombAcceleration::new(1e-5);
-        let a = acc.eval(par1.point_charge(), par2.point_charge());
+        // let acc = CoulombAcceleration::new(1e-5);
+        // let a = acc.eval(par1.point_charge(), par2.point_charge());
 
-        assert!(a[0] < 0.);
+        // assert!(a[0] < 0.);
     }
 
     #[test]

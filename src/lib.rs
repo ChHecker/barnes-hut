@@ -13,9 +13,44 @@ use std::marker::PhantomData;
 
 use crate::octree::Octree;
 use interaction::Particle;
-use nalgebra::{DMatrix, RealField, Vector3};
+use nalgebra::{DMatrix, RealField, SimdPartialOrd, SimdRealField, Vector3};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
+use simba::simd::{WideF32x4, WideF64x4};
+
+pub trait Simdx4: SimdRealField + SimdPartialOrd {}
+
+impl Simdx4 for WideF32x4 {}
+impl Simdx4 for WideF64x4 {}
+
+pub trait ToSimd
+where
+    Self: Sized,
+{
+    type Simd: Simdx4<Element = Self> + From<[Self; 4]>;
+
+    fn to_simd(arr: [Self; 4]) -> Self::Simd;
+}
+
+impl ToSimd for f32 {
+    type Simd = WideF32x4;
+
+    fn to_simd(arr: [Self; 4]) -> Self::Simd {
+        arr.into()
+    }
+}
+
+impl ToSimd for f64 {
+    type Simd = WideF64x4;
+
+    fn to_simd(arr: [Self; 4]) -> Self::Simd {
+        arr.into()
+    }
+}
+
+pub trait Float: RealField + ToSimd + Copy {}
+
+impl<F: RealField + ToSimd + Copy> Float for F {}
 
 #[derive(Clone, Debug)]
 enum Execution {
@@ -70,7 +105,7 @@ impl Step {
 #[derive(Debug)]
 pub struct BarnesHut<F, P, Q>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
@@ -82,7 +117,7 @@ where
 
 impl<F, P, Q> BarnesHut<F, P, Q>
 where
-    F: RealField + Copy,
+    F: Float,
     P: Particle<F>,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
@@ -143,7 +178,8 @@ where
         acceleration: &mut [Vector3<F>],
         current_step: Step,
     ) {
-        let octree = Octree::new(self.particles.as_ref(), theta, &self.acceleration);
+        let octree: Octree<'_, F, P> =
+            Octree::new(self.particles.as_ref(), theta, &self.acceleration);
 
         // Calculate accelerations
         match self.execution {
