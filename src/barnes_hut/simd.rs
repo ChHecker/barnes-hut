@@ -122,7 +122,8 @@ where
         let mut mass = [F::zero(); 4];
         let mut charge = [P::Charge::identity(); 4];
         let mut position: Vector3<F::Simd> =
-            Vector3::from_element(F::Simd::splat(F::from_f64(f64::INFINITY).unwrap()));
+            // Vector3::from_element(F::Simd::splat(F::from_f64(f64::INFINITY).unwrap()));
+            Vector3::zeros();
         for (i, par) in self.arr.iter().flatten().enumerate() {
             let pc = par.point_charge();
             mass[i] = pc.mass;
