@@ -187,7 +187,7 @@ where
                     OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
-                    (F::zero(), P::Charge::identity(), Vector3::zeros()),
+                    (F::zero(), P::Charge::zero(), Vector3::zeros()),
                     |(m_acc, c_acc, pos_acc), (&m, c, pos)| {
                         P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, c, pos)
                     },

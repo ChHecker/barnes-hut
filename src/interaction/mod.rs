@@ -22,14 +22,14 @@ pub use simd::*;
 /// This can be for example the mass for gravity,
 /// or the electrical charge for the Coulomb force.
 pub trait Charge: Clone + Copy + Debug + Send + Sync {
-    /// The identity function for this type such that
+    /// The zero function for this type such that
     /// - it exerts no force on other particles
     /// - and for all charges C, $C + C::identity() = C$ holds.
-    fn identity() -> Self;
+    fn zero() -> Self;
 }
 
 impl<F: Float> Charge for F {
-    fn identity() -> Self {
+    fn zero() -> Self {
         F::zero()
     }
 }

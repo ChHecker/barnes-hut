@@ -109,7 +109,7 @@ where
             .filter_map(|par| *par)
             .map(|par| (par.mass(), par.charge(), par.position()))
             .fold(
-                (F::zero(), P::Charge::identity(), Vector3::zeros()),
+                (F::zero(), P::Charge::zero(), Vector3::zeros()),
                 |(m_acc, c_acc, pos_acc), (&m, c, pos)| {
                     P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, c, pos)
                 },
@@ -120,7 +120,7 @@ where
         &self,
     ) -> PointCharge<F::Simd, <<P as SimdParticle<F>>::SimdCharge as SimdCharge>::Simd> {
         let mut mass = [F::zero(); 4];
-        let mut charge = [P::Charge::identity(); 4];
+        let mut charge = [P::Charge::zero(); 4];
         let mut position: Vector3<F::Simd> =
             // Vector3::from_element(F::Simd::splat(F::from_f64(f64::INFINITY).unwrap()));
             Vector3::zeros();
@@ -293,7 +293,7 @@ where
                     OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
-                    (F::zero(), P::Charge::identity(), Vector3::zeros()),
+                    (F::zero(), P::Charge::zero(), Vector3::zeros()),
                     |(m_acc, c_acc, pos_acc), (m, c, pos)| {
                         P::center_of_charge_and_mass(m_acc, c_acc, pos_acc, m, &c, &pos)
                     },

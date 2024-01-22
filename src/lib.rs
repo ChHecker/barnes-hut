@@ -24,6 +24,10 @@ impl<F: RealField + Copy> Float for F {}
 
 #[cfg(feature = "simd")]
 use barnes_hut::BarnesHutSimd;
+/*
+Re-export SimdParticle as Particle if SIMD feature is activated for convenient generic programming.
+If you need non-SIMD particles (e.g. to implement the trait), use [`interaction::Particle`] directly instead.
+*/
 #[cfg(feature = "simd")]
 pub use interaction::SimdParticle as Particle;
 #[cfg(feature = "simd")]
