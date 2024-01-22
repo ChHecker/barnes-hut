@@ -1,8 +1,8 @@
-pub mod coulomb;
-pub mod gravity;
+pub mod barnes_hut;
 pub mod interaction;
-pub mod octree;
 pub mod particle_creator;
+#[cfg(feature = "simd")]
+pub mod simd;
 #[cfg(feature = "visualization")]
 pub mod visualization;
 
@@ -11,52 +11,70 @@ mod csv;
 
 use std::marker::PhantomData;
 
-use crate::octree::Octree;
-use interaction::Particle;
-use nalgebra::{DMatrix, RealField, SimdPartialOrd, SimdRealField, Vector3};
-#[cfg(feature = "rayon")]
-use rayon::prelude::*;
-use simba::simd::{WideF32x4, WideF64x4};
+use barnes_hut::BarnesHut;
+use nalgebra::{DMatrix, RealField, Vector3};
 
-pub trait Simdx4: SimdRealField + SimdPartialOrd {}
+#[cfg(not(feature = "simd"))]
+pub use interaction::Particle;
 
-impl Simdx4 for WideF32x4 {}
-impl Simdx4 for WideF64x4 {}
+#[cfg(not(feature = "simd"))]
+pub trait Float: RealField + Copy {}
+#[cfg(not(feature = "simd"))]
+impl<F: RealField + Copy> Float for F {}
 
-pub trait ToSimd
-where
-    Self: Sized,
-{
-    type Simd: Simdx4<Element = Self> + From<[Self; 4]>;
+#[cfg(feature = "simd")]
+use barnes_hut::BarnesHutSimd;
+#[cfg(feature = "simd")]
+pub use interaction::SimdParticle as Particle;
+#[cfg(feature = "simd")]
+use simd::ToSimd;
 
-    fn to_simd(arr: [Self; 4]) -> Self::Simd;
-}
-
-impl ToSimd for f32 {
-    type Simd = WideF32x4;
-
-    fn to_simd(arr: [Self; 4]) -> Self::Simd {
-        arr.into()
-    }
-}
-
-impl ToSimd for f64 {
-    type Simd = WideF64x4;
-
-    fn to_simd(arr: [Self; 4]) -> Self::Simd {
-        arr.into()
-    }
-}
-
+#[cfg(feature = "simd")]
 pub trait Float: RealField + ToSimd + Copy {}
-
+#[cfg(feature = "simd")]
 impl<F: RealField + ToSimd + Copy> Float for F {}
 
-#[derive(Clone, Debug)]
-enum Execution {
+#[derive(Copy, Clone, Debug)]
+pub enum Execution {
     SingleThreaded,
     #[cfg(feature = "rayon")]
     MultiThreaded,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Simulator {
+    BarnesHut,
+    #[cfg(feature = "simd")]
+    BarnesHutSimd,
+}
+
+impl Simulator {
+    fn calculate_accelerations<F: Float, P: Particle<F>>(
+        &self,
+        accelerations: &mut [Vector3<F>],
+        particles: &[P],
+        theta: F,
+        acceleration: &P::Acceleration,
+        execution: Execution,
+    ) {
+        match self {
+            Simulator::BarnesHut => BarnesHut::calculate_accelerations(
+                accelerations,
+                particles,
+                theta,
+                acceleration,
+                execution,
+            ),
+            #[cfg(feature = "simd")]
+            Simulator::BarnesHutSimd => BarnesHutSimd::calculate_accelerations(
+                accelerations,
+                particles,
+                theta,
+                acceleration,
+                execution,
+            ),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -85,7 +103,7 @@ impl Step {
 /// # Example
 /// ```rust
 /// # use nalgebra::Vector3;
-/// # use barnes_hut::{BarnesHut, gravity::{GravitationalAcceleration, GravitationalParticle}};
+/// # use barnes_hut::{Simulation, interaction::gravity::{GravitationalAcceleration, GravitationalParticle}};
 /// let particles: Vec<_> = (0..1_000).map(|_| {
 ///         GravitationalParticle::new(
 ///             1e6,
@@ -95,7 +113,7 @@ impl Step {
 ///     }).collect();
 /// let acceleration = GravitationalAcceleration::new(1e-4);
 ///
-/// let mut bh = BarnesHut::new(particles, acceleration);
+/// let mut bh = Simulation::barnes_hut(particles, acceleration);
 /// bh.simulate(
 ///     0.1,
 ///     100,
@@ -103,7 +121,7 @@ impl Step {
 /// );
 /// ```
 #[derive(Debug)]
-pub struct BarnesHut<F, P, Q>
+pub struct Simulation<F, P, Q>
 where
     F: Float,
     P: Particle<F>,
@@ -112,10 +130,11 @@ where
     particles: Q,
     acceleration: P::Acceleration,
     execution: Execution,
+    simulator: Simulator,
     phantom: PhantomData<P>,
 }
 
-impl<F, P, Q> BarnesHut<F, P, Q>
+impl<F, P, Q> Simulation<F, P, Q>
 where
     F: Float,
     P: Particle<F>,
@@ -126,6 +145,7 @@ where
             particles,
             acceleration,
             execution: Execution::SingleThreaded,
+            simulator: Simulator::BarnesHut,
             phantom: PhantomData,
         }
     }
@@ -135,7 +155,7 @@ where
     /// # Example
     /// ```rust
     /// # use nalgebra::Vector3;
-    /// # use barnes_hut::{BarnesHut, gravity::{GravitationalAcceleration, GravitationalParticle}};
+    /// # use barnes_hut::{Simulation, interaction::gravity::{GravitationalAcceleration, GravitationalParticle}};
     /// let particles: Vec<_> = (0..1_000).map(|_| {
     ///         GravitationalParticle::new(
     ///             1e6,
@@ -145,7 +165,7 @@ where
     ///     }).collect();
     /// let acceleration = GravitationalAcceleration::new(1e-4);
     ///
-    /// let mut bh = BarnesHut::new(particles, acceleration).multithreaded();
+    /// let mut bh = Simulation::barnes_hut(particles, acceleration).multithreaded();
     /// bh.simulate(
     ///     0.1,
     ///     100,
@@ -155,6 +175,12 @@ where
     #[cfg(feature = "rayon")]
     pub fn multithreaded(mut self) -> Self {
         self.execution = Execution::MultiThreaded;
+        self
+    }
+
+    #[cfg(feature = "simd")]
+    pub fn simd(mut self) -> Self {
+        self.simulator = Simulator::BarnesHutSimd;
         self
     }
 
@@ -178,21 +204,13 @@ where
         acceleration: &mut [Vector3<F>],
         current_step: Step,
     ) {
-        let octree: Octree<'_, F, P> =
-            Octree::new(self.particles.as_ref(), theta, &self.acceleration);
-
-        // Calculate accelerations
-        match self.execution {
-            Execution::SingleThreaded => acceleration.iter_mut().enumerate().for_each(|(i, a)| {
-                *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
-            }),
-            #[cfg(feature = "rayon")]
-            Execution::MultiThreaded => {
-                acceleration.par_iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(&self.particles.as_ref()[i]);
-                });
-            }
-        }
+        self.simulator.calculate_accelerations(
+            acceleration,
+            self.particles.as_ref(),
+            theta,
+            &self.acceleration,
+            self.execution,
+        );
 
         /*
          * Leapfrog integration:

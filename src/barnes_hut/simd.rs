@@ -1,45 +1,35 @@
 use std::{marker::PhantomData, ops::Deref};
 
-use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue, Vector3};
+use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
+use super::*;
 use crate::{
-    interaction::{Acceleration, Charge, Particle},
-    Float, ToSimd,
+    interaction::{SimdAcceleration, SimdCharge, SimdParticle},
+    simd::ToSimd,
+    Execution, Float,
 };
 
-#[cfg(debug_assertions)]
-macro_rules! unreachable_debug {
-    ($arg:expr) => {
-        unreachable!($arg)
-    };
-}
-
-#[cfg(not(debug_assertions))]
-macro_rules! unreachable_debug {
-    ($arg:tt) => {
-        ()
-    };
-}
-
 #[derive(Clone, Debug)]
-pub struct Octree<'a, F, P>
+pub struct BarnesHutSimd<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
-    root: Node<'a, F, P>,
+    root: SimdNode<'a, F, P>,
     theta: F,
     acceleration: &'a P::Acceleration,
 }
 
-impl<'a, F, P> Octree<'a, F, P>
+impl<'a, F, P> BarnesHutSimd<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     pub fn new(particles: &'a [P], theta: F, acceleration: &'a P::Acceleration) -> Self {
         Self {
-            root: Node::from_particles(particles),
+            root: SimdNode::from_particles(particles),
             theta,
             acceleration,
         }
@@ -49,27 +39,26 @@ where
         self.root
             .calculate_acceleration(particle, self.acceleration, self.theta)
     }
-}
 
-#[derive(Clone, Debug)]
-pub struct PointCharge<S, C>
-where
-    S: SimdRealField,
-{
-    pub mass: S,
-    pub charge: C,
-    pub position: Vector3<S>,
-}
+    pub fn calculate_accelerations<'b: 'a>(
+        accelerations: &mut [Vector3<F>],
+        particles: &'b [P],
+        theta: F,
+        acceleration: &'b P::Acceleration,
+        execution: Execution,
+    ) {
+        let octree = Self::new(particles, theta, acceleration);
 
-impl<S, C> PointCharge<S, C>
-where
-    S: SimdRealField,
-{
-    pub fn new(mass: S, charge: C, position: Vector3<S>) -> Self {
-        Self {
-            mass,
-            charge,
-            position,
+        match execution {
+            Execution::SingleThreaded => accelerations.iter_mut().enumerate().for_each(|(i, a)| {
+                *a = octree.calculate_acceleration(&particles[i]);
+            }),
+            #[cfg(feature = "rayon")]
+            Execution::MultiThreaded => {
+                accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
+                    *a = octree.calculate_acceleration(&particles[i]);
+                });
+            }
         }
     }
 }
@@ -78,7 +67,7 @@ where
 struct ParticleArray<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     arr: [Option<&'a P>; 4],
     len: usize,
@@ -88,7 +77,7 @@ where
 impl<'a, F, P> ParticleArray<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     fn from_particle(particle: &'a P) -> Self {
         let mut arr: [Option<&'a P>; 4] = [None; 4];
@@ -129,11 +118,11 @@ where
 
     fn point_charge_simd(
         &self,
-    ) -> PointCharge<F::Simd, <<P as Particle<F>>::Charge as Charge>::Simd> {
+    ) -> PointCharge<F::Simd, <<P as SimdParticle<F>>::SimdCharge as SimdCharge>::Simd> {
         let mut mass = [F::zero(); 4];
         let mut charge = [P::Charge::identity(); 4];
-        let mut position: Vector3<F::Simd> = Vector3::zeros();
-
+        let mut position: Vector3<F::Simd> =
+            Vector3::from_element(F::Simd::splat(F::from_f64(f64::INFINITY).unwrap()));
         for (i, par) in self.arr.iter().flatten().enumerate() {
             let pc = par.point_charge();
             mass[i] = pc.mass;
@@ -149,7 +138,7 @@ where
 impl<'a, F, P> Default for ParticleArray<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     fn default() -> Self {
         let arr: [Option<&'a P>; 4] = [None; 4];
@@ -164,7 +153,7 @@ where
 impl<'a, F, P> Deref for ParticleArray<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     type Target = [Option<&'a P>];
 
@@ -177,7 +166,7 @@ where
 enum OptionalCharge<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     Particle(ParticleArray<'a, F, P>),
     Point(PointCharge<F, P::Charge>),
@@ -187,7 +176,7 @@ where
 impl<'a, F, P> OptionalCharge<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
     fn take(&mut self) -> Self {
         let mut ret = OptionalCharge::None;
@@ -196,24 +185,56 @@ where
     }
 }
 
-type Subnodes<'a, F, P> = [Option<Node<'a, F, P>>; 8];
-
 #[derive(Clone, Debug)]
-struct Node<'a, F, P>
+struct SimdNode<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
 {
-    subnodes: Option<Box<Subnodes<'a, F, P>>>,
+    subnodes: Option<Box<Subnodes<Self>>>,
     charge: OptionalCharge<'a, F, P>,
     center: Vector3<F>,
     width: F,
 }
 
-impl<'a, F, P> Node<'a, F, P>
+impl<'a, F, P> SimdNode<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: SimdParticle<F>,
+{
+    fn insert_particle_subdivide(&mut self, new_particle: &'a P) {
+        if let OptionalCharge::Particle(previous_particles) = &mut self.charge {
+            if previous_particles.push(new_particle) {
+                return;
+            }
+        }
+
+        if let OptionalCharge::Particle(previous_particles) = self.charge.take() {
+            let mut new_nodes: Subnodes<Self> = Default::default();
+
+            let new_index = Self::choose_subnode(&self.center, new_particle.position());
+            let mut new_node = SimdNode::new(
+                Self::center_from_subnode(self.width, self.center, new_index),
+                self.width / F::from_f64(2.).unwrap(),
+            );
+            // Insert new particle
+            new_node.charge = OptionalCharge::Particle(ParticleArray::from_particle(new_particle));
+            new_nodes[new_index] = Some(new_node);
+
+            self.subnodes = Some(Box::new(new_nodes));
+
+            for particle in previous_particles.iter().flatten() {
+                self.insert_particle(particle);
+            }
+            self.calculate_charge();
+        }
+    }
+}
+
+impl<'a, F, P> super::Node<'a, F, P> for SimdNode<'a, F, P>
+where
+    F: Float,
+    P: SimdParticle<F>,
 {
     fn new(center: Vector3<F>, width: F) -> Self {
         Self {
@@ -224,33 +245,6 @@ where
         }
     }
 
-    fn from_particles(particles: &'a [P]) -> Self {
-        let mut v_min = Vector3::zeros();
-        let mut v_max = Vector3::zeros();
-        for particle in particles.as_ref().iter() {
-            for (i, elem) in particle.position().iter().enumerate() {
-                if *elem > v_max[i] {
-                    v_max[i] = *elem;
-                }
-                if *elem < v_min[i] {
-                    v_min[i] = *elem;
-                }
-            }
-        }
-        let width = (v_max - v_min).max();
-        let center = v_min + v_max / F::from_f64(2.).unwrap();
-
-        let mut node = Self::new(center, width);
-
-        for particle in particles {
-            node.insert_particle(particle);
-        }
-
-        node.calculate_charge();
-
-        node
-    }
-
     fn insert_particle(&mut self, particle: &'a P) {
         match &mut self.subnodes {
             // Self is inner node, insert recursively
@@ -258,8 +252,8 @@ where
                 let new_subnode = Self::choose_subnode(&self.center, particle.position());
 
                 let node = subnodes[new_subnode].get_or_insert_with(|| {
-                    Node::new(
-                        Self::center_from_subnode_static(self.width, self.center, new_subnode),
+                    SimdNode::new(
+                        Self::center_from_subnode(self.width, self.center, new_subnode),
                         self.width / F::from_f64(2.).unwrap(),
                     )
                 });
@@ -284,34 +278,6 @@ where
                     self.charge = OptionalCharge::Particle(ParticleArray::from_particle(particle));
                 }
             },
-        }
-    }
-
-    fn insert_particle_subdivide(&mut self, new_particle: &'a P) {
-        if let OptionalCharge::Particle(previous_particles) = &mut self.charge {
-            if previous_particles.push(new_particle) {
-                return;
-            }
-        }
-
-        if let OptionalCharge::Particle(previous_particles) = self.charge.take() {
-            let mut new_nodes: Subnodes<'a, F, P> = Default::default();
-
-            let new_index = Self::choose_subnode(&self.center, new_particle.position());
-            let mut new_node = Node::new(
-                self.center_from_subnode(new_index),
-                self.width / F::from_f64(2.).unwrap(),
-            );
-            // Insert new particle
-            new_node.charge = OptionalCharge::Particle(ParticleArray::from_particle(new_particle));
-            new_nodes[new_index] = Some(new_node);
-
-            self.subnodes = Some(Box::new(new_nodes));
-
-            for particle in previous_particles.iter().flatten() {
-                self.insert_particle(particle);
-            }
-            self.calculate_charge();
         }
     }
 
@@ -389,60 +355,5 @@ where
         }
 
         acc
-    }
-
-    fn choose_subnode(center: &Vector3<F>, position: &Vector3<F>) -> usize {
-        if position.x > center.x {
-            if position.y > center.y {
-                if position.z > center.z {
-                    return 0;
-                }
-                return 4;
-            }
-            if position.z > center.z {
-                return 3;
-            }
-            return 7;
-        }
-        if position.y > center.y {
-            if position.z > center.z {
-                return 1;
-            }
-            return 5;
-        }
-        if position.z > center.z {
-            return 2;
-        }
-        6
-    }
-
-    fn center_from_subnode(&self, i: usize) -> Vector3<F> {
-        Self::center_from_subnode_static(self.width, self.center, i)
-    }
-
-    fn center_from_subnode_static(width: F, center: Vector3<F>, i: usize) -> Vector3<F> {
-        let step_size = width / F::from_f64(2.).unwrap();
-        if i == 0 {
-            return center + Vector3::new(step_size, step_size, step_size);
-        }
-        if i == 1 {
-            return center + Vector3::new(-step_size, step_size, step_size);
-        }
-        if i == 2 {
-            return center + Vector3::new(-step_size, -step_size, step_size);
-        }
-        if i == 3 {
-            return center + Vector3::new(step_size, -step_size, step_size);
-        }
-        if i == 4 {
-            return center + Vector3::new(step_size, step_size, -step_size);
-        }
-        if i == 5 {
-            return center + Vector3::new(-step_size, step_size, -step_size);
-        }
-        if i == 6 {
-            return center + Vector3::new(-step_size, -step_size, -step_size);
-        }
-        center + Vector3::new(step_size, -step_size, -step_size)
     }
 }

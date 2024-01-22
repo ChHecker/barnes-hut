@@ -7,8 +7,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["randomization", "rayon", "visualization"]
+default = ["randomization", "rayon", "simd", "visualization"]
 randomization = ["rand", "rand_distr"]
+simd = ["simba"]
 visualization = ["anyhow", "blue_engine"]
 
 [dependencies]
@@ -18,7 +19,7 @@ nalgebra = "0.32.3"
 rand = { version = "0.8.5", optional = true }
 rand_distr = { version = "0.4.3", optional = true }
 rayon = { version = "1.8.0", optional = true }
-simba = "0.8.1"
+simba = { version = "0.8.1", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"

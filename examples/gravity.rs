@@ -1,6 +1,6 @@
 use barnes_hut::{
-    gravity::{GravitationalAcceleration, GravitationalParticle},
-    BarnesHut,
+    interaction::gravity::{GravitationalAcceleration, GravitationalParticle},
+    Simulation,
 };
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -18,7 +18,7 @@ fn main() {
             )
         })
         .collect::<Vec<_>>();
-    let mut bh = BarnesHut::new(particles, acceleration);
+    let mut bh = Simulation::new(particles, acceleration);
 
     bh.simulate(0.1, 100, 1.5);
 }

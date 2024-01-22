@@ -26,7 +26,7 @@ mod random {
     use rand_distr::{Distribution, Uniform};
 
     use super::*;
-    use crate::gravity::{GravitationalParticle, G};
+    use crate::interaction::gravity::{GravitationalParticle, G};
     use crate::interaction::{SamplableCharge, SamplableParticle};
 
     #[derive(Clone)]
@@ -170,7 +170,8 @@ mod random {
     mod tests {
         use approx::assert_abs_diff_eq;
 
-        use crate::{gravity::GravitationalAcceleration, BarnesHut};
+        use crate::interaction::gravity::GravitationalAcceleration;
+        use crate::Simulation;
 
         use super::*;
 
@@ -186,7 +187,7 @@ mod random {
             );
             let par = pc.create_particles(2);
 
-            let mut bh = BarnesHut::new(par, acc);
+            let mut bh = Simulation::new(par, acc);
             let pos = bh.simulate(0.1, num_steps, 0.);
 
             let last = pos.row(num_steps);

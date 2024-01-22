@@ -1,8 +1,12 @@
 use std::ops::Mul;
 
-use nalgebra::{SimdComplexField, SimdValue, Vector3};
+use nalgebra::Vector3;
+#[cfg(feature = "simd")]
+use nalgebra::{SimdComplexField, SimdValue};
 
-use crate::{interaction::Acceleration, interaction::Particle, octree::PointCharge, Float};
+#[cfg(feature = "simd")]
+use super::{SimdAcceleration, SimdParticle};
+use crate::{barnes_hut::PointCharge, interaction::Acceleration, interaction::Particle, Float};
 
 pub const G: f64 = 6.6743015e-11;
 
@@ -26,7 +30,7 @@ where
 
 impl<F: Float> Acceleration<F> for GravitationalAcceleration<F>
 where
-    Vector3<F::Simd>: Mul<F::Simd, Output = Vector3<F::Simd>>,
+    Vector3<F>: Mul<F, Output = Vector3<F>>,
 {
     type Charge = F;
     type Particle = GravitationalParticle<F>;
@@ -40,6 +44,14 @@ where
         let r_square = r.norm_squared();
         r * F::from_f64(G).unwrap() * particle2.mass / (r_square + self.epsilon).sqrt().powi(3)
     }
+}
+
+#[cfg(feature = "simd")]
+impl<F: Float> SimdAcceleration<F> for GravitationalAcceleration<F>
+where
+    Vector3<F::Simd>: Mul<F::Simd, Output = Vector3<F::Simd>>,
+{
+    type SimdCharge = F;
 
     fn eval_simd(
         &self,
@@ -143,25 +155,30 @@ where
     }
 }
 
+#[cfg(feature = "simd")]
+impl<F: Float> SimdParticle<F> for GravitationalParticle<F> {
+    type SimdCharge = F;
+    type SimdAcceleration = GravitationalAcceleration<F>;
+}
+
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
     use rand::Rng;
 
-    use crate::BarnesHut;
+    use crate::Simulation;
 
     use super::*;
 
     #[test]
     fn test_acceleration() {
-        todo!()
-        // let par1 = GravitationalParticle::new(1., Vector3::new(1., 0., 0.), Vector3::zeros());
-        // let par2 = GravitationalParticle::new(1., Vector3::new(-1., 0., 0.), Vector3::zeros());
+        let par1 = GravitationalParticle::new(1., Vector3::new(1., 0., 0.), Vector3::zeros());
+        let par2 = GravitationalParticle::new(1., Vector3::new(-1., 0., 0.), Vector3::zeros());
 
-        // let acc = GravitationalAcceleration::new(1e-5);
-        // let a = acc.eval(par1.point_charge(), par2.point_charge());
+        let acc = GravitationalAcceleration::new(1e-5);
+        let a = acc.eval(par1.point_charge(), par2.point_charge());
 
-        // assert!(a[0] < 0.);
+        assert!(a[0] < 0.);
     }
 
     #[test]
@@ -171,7 +188,7 @@ mod tests {
             GravitationalParticle::new(1e6, Vector3::new(1., 0., 0.), Vector3::zeros()),
             GravitationalParticle::new(1e6, Vector3::new(-1., 0., 0.), Vector3::zeros()),
         ];
-        let mut bh = BarnesHut::new(particles, acc);
+        let mut bh = Simulation::new(particles, acc);
 
         let num_steps = 5;
         let positions = bh.simulate(1., num_steps, 1.5);
@@ -204,8 +221,8 @@ mod tests {
             })
             .collect();
 
-        let mut brute_force = BarnesHut::new(particles.clone(), acceleration.clone());
-        let mut barnes_hut = BarnesHut::new(particles, acceleration);
+        let mut brute_force = Simulation::new(particles.clone(), acceleration.clone());
+        let mut barnes_hut = Simulation::new(particles, acceleration);
 
         let pos_bf = brute_force.simulate(0.1, 10, 0.);
         let pos_bh = barnes_hut.simulate(0.1, 10, 1.5);

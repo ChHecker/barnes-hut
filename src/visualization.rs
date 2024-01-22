@@ -1,6 +1,7 @@
 use std::time::Instant;
 
-use crate::{interaction::Particle, particle_creator::ParticleCreator, BarnesHut, Float, Step};
+use crate::{particle_creator::ParticleCreator, Float, Particle, Simulation, Step};
+#[cfg(feature = "simd")]
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
 use nalgebra::Vector3;
 
@@ -11,7 +12,7 @@ where
     P: Particle<F> + 'static,
 {
     engine: Engine,
-    barnes_hut: BarnesHut<F, P, Vec<P>>,
+    simulator: Simulation<F, P, Vec<P>>,
 }
 
 impl<F, P> Visualizer<F, P>
@@ -22,22 +23,22 @@ where
     /// Create a new visualizer.
     ///
     /// # Arguments
-    /// - `barnes_hut`: A [`BarnesHut`] struct.
+    /// - `simulator`: A [`Simulation`] struct.
     /// - `width`: Width of the window.
     /// - `height`: Height of the window.
     pub fn new(
-        barnes_hut: BarnesHut<F, P, Vec<P>>,
+        simulator: Simulation<F, P, Vec<P>>,
         width: u32,
         height: u32,
     ) -> anyhow::Result<Self> {
         let mut engine = Engine::new_config(WindowDescriptor {
             width,
             height,
-            title: "Barnes-Hut",
+            title: "N-body simulation",
             ..Default::default()
         })?;
 
-        for (i, par) in barnes_hut.particles().iter().enumerate() {
+        for (i, par) in simulator.particles().iter().enumerate() {
             uv_sphere(
                 format!("particle{i}"),
                 (8, 20, par.mass().log10().to_subset().unwrap() as f32 / 50.),
@@ -45,7 +46,7 @@ where
                 &mut engine.objects,
             )?;
         }
-        Ok(Self { engine, barnes_hut })
+        Ok(Self { engine, simulator })
     }
 
     pub fn from_particle_creator<Pc: ParticleCreator<F, P>>(
@@ -56,9 +57,19 @@ where
         height: u32,
     ) -> anyhow::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
-        let barnes_hut = BarnesHut::new(particles, acceleration);
+        let barnes_hut = Simulation::new(particles, acceleration);
 
         Self::new(barnes_hut, width, height)
+    }
+
+    pub fn multithreaded(mut self) -> Self {
+        self.simulator = self.simulator.multithreaded();
+        self
+    }
+
+    pub fn simd(mut self) -> Self {
+        self.simulator = self.simulator.simd();
+        self
     }
 
     /// Visualize the simulation.
@@ -67,7 +78,7 @@ where
     /// - `speed`: How much faster the simulation should run than real time.
     /// - `theta`: Barnes-Hut parameter to pass to [`BarnesHut::simulate()`].
     pub fn visualize(mut self, speed: F, theta: F) -> anyhow::Result<()> {
-        let n = self.barnes_hut.particles().len();
+        let n = self.simulator.particles().len();
 
         let mut acceleration = vec![Vector3::zeros(); n];
 
@@ -76,10 +87,10 @@ where
 
         self.engine.update_loop(move |_, _, objects, _, _, _| {
             let step = F::from_f64(time.elapsed().as_secs_f64()).unwrap() * speed;
-            self.barnes_hut
+            self.simulator
                 .step(step, theta, &mut acceleration, current_step);
 
-            for (i, par) in self.barnes_hut.particles().iter().enumerate() {
+            for (i, par) in self.simulator.particles().iter().enumerate() {
                 let pos = par.position();
 
                 let obj = objects.get_mut(&format!("particle{i}")).unwrap();

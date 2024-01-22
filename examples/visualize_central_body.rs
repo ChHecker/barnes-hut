@@ -1,5 +1,5 @@
 use barnes_hut::{
-    gravity::GravitationalAcceleration, particle_creator::CentralBodyParticleCreator,
+    interaction::gravity::GravitationalAcceleration, particle_creator::CentralBodyParticleCreator,
     visualization::Visualizer,
 };
 use rand_distr::{Normal, Uniform};

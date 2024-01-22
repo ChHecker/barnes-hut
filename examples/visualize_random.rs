@@ -1,5 +1,5 @@
 use barnes_hut::{
-    gravity::{GravitationalAcceleration, GravitationalParticle},
+    interaction::gravity::{GravitationalAcceleration, GravitationalParticle},
     particle_creator::DistrParticleCreator,
     visualization::Visualizer,
 };
