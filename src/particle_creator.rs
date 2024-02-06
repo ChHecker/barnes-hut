@@ -22,6 +22,7 @@ mod random {
 
     use nalgebra::Vector3;
     use rand::rngs::ThreadRng;
+    use rand::Rng;
     use rand_distr::uniform::SampleUniform;
     use rand_distr::{Distribution, Uniform};
 
@@ -29,17 +30,17 @@ mod random {
     use crate::interaction::gravity::{GravitationalParticle, G};
     use crate::interaction::{SamplableCharge, SamplableParticle};
 
-    #[derive(Clone)]
-    pub struct DistrParticleCreator<F, P, MD, CD, PD, VD>
+    pub struct DistrParticleCreator<F, P, R, MD, CD, PD, VD>
     where
         F: Float,
         P: SamplableParticle<F>,
+        R: Rng,
         MD: Distribution<F>,
         CD: Distribution<F>,
         PD: Distribution<F>,
         VD: Distribution<F>,
     {
-        rng: ThreadRng,
+        rng: R,
         mass_distr: MD,
         charge_distr: CD,
         position_distr: PD,
@@ -47,7 +48,7 @@ mod random {
         phantom: PhantomData<(F, P)>,
     }
 
-    impl<F, P, PD, VD, MD, CD> DistrParticleCreator<F, P, MD, CD, PD, VD>
+    impl<F, P, PD, VD, MD, CD> DistrParticleCreator<F, P, ThreadRng, MD, CD, PD, VD>
     where
         F: Float,
         P: SamplableParticle<F>,
@@ -73,10 +74,40 @@ mod random {
         }
     }
 
-    impl<F, P, PD, VD, MD, CD> ParticleCreator<F, P> for DistrParticleCreator<F, P, MD, CD, PD, VD>
+    impl<F, P, R, PD, VD, MD, CD> DistrParticleCreator<F, P, R, MD, CD, PD, VD>
     where
         F: Float,
         P: SamplableParticle<F>,
+        R: Rng,
+        MD: Distribution<F>,
+        CD: Distribution<F>,
+        PD: Distribution<F>,
+        VD: Distribution<F>,
+    {
+        pub fn rng(
+            mass_distr: MD,
+            charge_distr: CD,
+            position_distr: PD,
+            velocity_distr: VD,
+            rng: R,
+        ) -> Self {
+            Self {
+                rng,
+                mass_distr,
+                charge_distr,
+                position_distr,
+                velocity_distr,
+                phantom: PhantomData,
+            }
+        }
+    }
+
+    impl<F, P, R, PD, VD, MD, CD> ParticleCreator<F, P>
+        for DistrParticleCreator<F, P, R, MD, CD, PD, VD>
+    where
+        F: Float,
+        P: SamplableParticle<F>,
+        R: Rng,
         MD: Distribution<F>,
         CD: Distribution<F>,
         PD: Distribution<F>,

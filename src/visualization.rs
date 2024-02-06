@@ -63,7 +63,7 @@ where
     }
 
     pub fn multithreaded(mut self) -> Self {
-        self.simulator = self.simulator.multithreaded();
+        self.simulator = self.simulator.rayon();
         self
     }
 
@@ -87,6 +87,7 @@ where
 
         self.engine.update_loop(move |_, _, objects, _, _, _| {
             let step = F::from_f64(time.elapsed().as_secs_f64()).unwrap() * speed;
+            println!("FPS: {}", 1. / time.elapsed().as_secs_f64());
             self.simulator
                 .step(step, theta, &mut acceleration, current_step);
 

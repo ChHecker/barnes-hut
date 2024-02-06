@@ -41,8 +41,11 @@ impl<F: RealField + ToSimd + Copy> Float for F {}
 #[derive(Copy, Clone, Debug)]
 pub enum Execution {
     SingleThreaded,
+    Multithreaded {
+        num_threads: usize,
+    },
     #[cfg(feature = "rayon")]
-    MultiThreaded,
+    Rayon,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -154,6 +157,11 @@ where
         }
     }
 
+    pub fn multithreaded(mut self, num_threads: usize) -> Self {
+        self.execution = Execution::Multithreaded { num_threads };
+        self
+    }
+
     /// Use multiple threads to calculate the forces.
     ///
     /// # Example
@@ -177,8 +185,8 @@ where
     /// );
     /// ```
     #[cfg(feature = "rayon")]
-    pub fn multithreaded(mut self) -> Self {
-        self.execution = Execution::MultiThreaded;
+    pub fn rayon(mut self) -> Self {
+        self.execution = Execution::Rayon;
         self
     }
 

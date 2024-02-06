@@ -18,7 +18,7 @@ fn main() {
             )
         })
         .collect::<Vec<_>>();
-    let mut bh = Simulation::new(particles, acceleration);
+    let mut bh = Simulation::new(particles, acceleration).multithreaded(2);
 
     bh.simulate(0.1, 100, 1.5);
 }

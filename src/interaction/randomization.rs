@@ -1,14 +1,14 @@
 use super::*;
 
-use rand::rngs::ThreadRng;
+use rand::Rng;
 use rand_distr::Distribution;
 
 pub trait SamplableCharge<F: Float>: Charge {
-    fn sample(distr: impl Distribution<F>, rng: &mut ThreadRng) -> Self;
+    fn sample(distr: impl Distribution<F>, rng: &mut impl Rng) -> Self;
 }
 
 impl<F: Float> SamplableCharge<F> for F {
-    fn sample(distr: impl Distribution<F>, rng: &mut ThreadRng) -> Self {
+    fn sample(distr: impl Distribution<F>, rng: &mut impl Rng) -> Self {
         distr.sample(rng)
     }
 }

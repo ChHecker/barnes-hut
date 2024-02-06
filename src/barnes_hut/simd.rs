@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{marker::PhantomData, ops::Deref, sync::mpsc, thread};
 
 use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
 #[cfg(feature = "rayon")]
@@ -53,8 +53,32 @@ where
             Execution::SingleThreaded => accelerations.iter_mut().enumerate().for_each(|(i, a)| {
                 *a = octree.calculate_acceleration(&particles[i]);
             }),
+            Execution::Multithreaded { num_threads } => {
+                let (tx, rx) = mpsc::channel();
+                let mut chunks = vec![accelerations.len() / num_threads; num_threads];
+                chunks[num_threads - 1] += particles.len() % num_threads;
+
+                for i in 0..num_threads {
+                    thread::scope(|s| {
+                        s.spawn(|| {
+                            let acc: Vec<_> = (0..chunks[i])
+                                .map(|j| {
+                                    octree.calculate_acceleration(&particles[i * chunks[0] + j])
+                                })
+                                .collect();
+                            tx.send(acc).unwrap();
+                        });
+                    });
+                }
+
+                for acc in rx.iter().take(num_threads) {
+                    for (i, a) in acc.into_iter().enumerate() {
+                        accelerations[i] = a;
+                    }
+                }
+            }
             #[cfg(feature = "rayon")]
-            Execution::MultiThreaded => {
+            Execution::Rayon => {
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
                     *a = octree.calculate_acceleration(&particles[i]);
                 });
