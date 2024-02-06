@@ -50,6 +50,102 @@ fn barnes_hut_particles(c: &mut Criterion) {
                 BatchSize::SmallInput,
             )
         });
+
+        group.bench_with_input(
+            BenchmarkId::new("scalar multithreaded", n_par),
+            &n_par,
+            |b, &n_par| {
+                b.iter_batched_ref(
+                    || {
+                        let acc = GravitationalAcceleration::new(1e-5);
+                        let par = (0..n_par)
+                            .map(|_| {
+                                GravitationalParticle::new(
+                                    rng.gen_range(0.0..1000.0),
+                                    10. * Vector3::new_random(),
+                                    Vector3::new_random(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        Simulation::new(par, acc).multithreaded(4)
+                    },
+                    |bh| bh.simulate(0.1, 10, 1.5),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("simd multithreaded", n_par),
+            &n_par,
+            |b, &n_par| {
+                b.iter_batched_ref(
+                    || {
+                        let acc = GravitationalAcceleration::new(1e-5);
+                        let par = (0..n_par)
+                            .map(|_| {
+                                GravitationalParticle::new(
+                                    rng.gen_range(0.0..1000.0),
+                                    10. * Vector3::new_random(),
+                                    Vector3::new_random(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        Simulation::new(par, acc).simd().multithreaded(4)
+                    },
+                    |bh| bh.simulate(0.1, 10, 1.5),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("scalar rayon", n_par),
+            &n_par,
+            |b, &n_par| {
+                b.iter_batched_ref(
+                    || {
+                        let acc = GravitationalAcceleration::new(1e-5);
+                        let par = (0..n_par)
+                            .map(|_| {
+                                GravitationalParticle::new(
+                                    rng.gen_range(0.0..1000.0),
+                                    10. * Vector3::new_random(),
+                                    Vector3::new_random(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        Simulation::new(par, acc).rayon()
+                    },
+                    |bh| bh.simulate(0.1, 10, 1.5),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("simd rayon", n_par),
+            &n_par,
+            |b, &n_par| {
+                b.iter_batched_ref(
+                    || {
+                        let acc = GravitationalAcceleration::new(1e-5);
+                        let par = (0..n_par)
+                            .map(|_| {
+                                GravitationalParticle::new(
+                                    rng.gen_range(0.0..1000.0),
+                                    10. * Vector3::new_random(),
+                                    Vector3::new_random(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        Simulation::new(par, acc).simd().rayon()
+                    },
+                    |bh| bh.simulate(0.1, 10, 1.5),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
     }
 }
 
@@ -87,5 +183,5 @@ fn barnes_hut_theta(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, barnes_hut_particles, barnes_hut_theta);
+criterion_group!(benches, barnes_hut_particles, barnes_hut_theta,);
 criterion_main!(benches);
