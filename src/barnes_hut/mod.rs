@@ -27,6 +27,8 @@ mod simd;
 #[cfg(feature = "simd")]
 pub use simd::*;
 
+pub mod sorting;
+
 #[derive(Clone, Debug)]
 pub struct PointCharge<S, C>
 where

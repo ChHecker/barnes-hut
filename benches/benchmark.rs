@@ -6,7 +6,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
-fn barnes_hut_particles(c: &mut Criterion) {
+fn particles(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0);
 
     let mut group = c.benchmark_group("barnes hut particles");
@@ -101,7 +101,7 @@ fn barnes_hut_particles(c: &mut Criterion) {
     }
 }
 
-fn barnes_hut_theta(c: &mut Criterion) {
+fn theta(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0);
 
     let acc = GravitationalAcceleration::new(1e-5);
@@ -135,5 +135,72 @@ fn barnes_hut_theta(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, barnes_hut_particles, barnes_hut_theta,);
+fn sorting(c: &mut Criterion) {
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let acc = GravitationalAcceleration::new(1e-5);
+    let particles = (0..50)
+        .map(|_| {
+            GravitationalParticle::new(
+                rng.gen_range(0.0..1000.0),
+                10. * Vector3::new_random(),
+                Vector3::new_random(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut group = c.benchmark_group("barnes hut sorting");
+    for n in [0, 10, 100] {
+        group.bench_with_input(BenchmarkId::new("simd", n), &n, |b, &n| {
+            b.iter_batched_ref(
+                || {
+                    Simulation::new(particles.clone(), acc.clone())
+                        .simd()
+                        .sorting(n)
+                },
+                |bh| bh.simulate(0.1, 1000, 1.5),
+                BatchSize::SmallInput,
+            )
+        });
+    }
+}
+
+fn optimization(c: &mut Criterion) {
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let acc = GravitationalAcceleration::new(1e-5);
+    let particles = (0..100_000)
+        .map(|_| {
+            GravitationalParticle::new(
+                rng.gen_range(0.0..1000.0),
+                10. * Vector3::new_random(),
+                Vector3::new_random(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut group = c.benchmark_group("barnes hut optimized");
+
+    group.bench_function("standard", |b| {
+        b.iter_batched_ref(
+            || Simulation::new(particles.clone(), acc.clone()),
+            |bh| bh.simulate(0.1, 1, 1.5),
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("optimal", |b| {
+        b.iter_batched_ref(
+            || {
+                Simulation::new(particles.clone(), acc.clone())
+                    .simd()
+                    .sorting(1)
+            },
+            |bh| bh.simulate(0.1, 1, 1.5),
+            BatchSize::SmallInput,
+        )
+    });
+}
+
+criterion_group!(benches, particles, theta, sorting, optimization);
 criterion_main!(benches);

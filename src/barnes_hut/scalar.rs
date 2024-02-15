@@ -8,7 +8,7 @@ use crate::Execution;
 use super::*;
 
 #[derive(Clone, Debug)]
-enum OptionalCharge<'a, F, P>
+pub(super) enum OptionalCharge<'a, F, P>
 where
     F: Float,
     P: Particle<F>,
@@ -96,13 +96,13 @@ where
 }
 
 #[derive(Clone)]
-struct ScalarNode<'a, F, P>
+pub(super) struct ScalarNode<'a, F, P>
 where
     F: Float,
     P: Particle<F>,
 {
-    subnodes: Option<Box<Subnodes<Self>>>,
-    charge: OptionalCharge<'a, F, P>,
+    pub(super) subnodes: Option<Box<Subnodes<Self>>>,
+    pub(super) charge: OptionalCharge<'a, F, P>,
     center: Vector3<F>,
     width: F,
 }

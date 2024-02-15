@@ -11,7 +11,7 @@ mod csv;
 
 use std::marker::PhantomData;
 
-use barnes_hut::BarnesHut;
+use barnes_hut::{sorting::sort_particles, BarnesHut};
 use nalgebra::{DMatrix, RealField, Vector3};
 
 #[cfg(not(feature = "simd"))]
@@ -46,6 +46,12 @@ pub enum Execution {
     },
     #[cfg(feature = "rayon")]
     Rayon,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Sorting {
+    None,
+    EveryNIteration(usize),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -92,16 +98,22 @@ impl Simulator {
 pub enum Step {
     First,
     Middle,
+    Sort,
     Last,
 }
 
 impl Step {
-    pub fn from_index(index: usize, num_steps: usize) -> Self {
+    pub fn from_index(index: usize, num_steps: usize, sorting: Sorting) -> Self {
         if index == 0 {
             Step::First
         } else if index == num_steps - 1 {
             Step::Last
         } else {
+            if let Sorting::EveryNIteration(n) = sorting {
+                if index % n == 0 {
+                    return Step::Sort;
+                }
+            }
             Step::Middle
         }
     }
@@ -142,6 +154,7 @@ where
     acceleration: P::Acceleration,
     execution: Execution,
     simulator: Simulator,
+    sorting: Sorting,
     phantom: PhantomData<P>,
 }
 
@@ -158,6 +171,7 @@ where
             acceleration,
             execution: Execution::SingleThreaded,
             simulator: Simulator::BarnesHut,
+            sorting: Sorting::None,
             phantom: PhantomData,
         }
     }
@@ -201,6 +215,13 @@ where
         self
     }
 
+    pub fn sorting(mut self, every_n_iterations: usize) -> Self {
+        if every_n_iterations != 0 {
+            self.sorting = Sorting::EveryNIteration(every_n_iterations);
+        }
+        self
+    }
+
     /// Get an immutable reference to the particles.
     pub fn particles(&self) -> &[P] {
         self.particles.as_ref()
@@ -221,6 +242,10 @@ where
         acceleration: &mut [Vector3<F>],
         current_step: Step,
     ) {
+        if let Step::Sort = current_step {
+            sort_particles(self.particles.as_mut());
+        }
+
         self.simulator.calculate_accelerations(
             acceleration,
             self.particles.as_ref(),
@@ -280,7 +305,7 @@ where
         let mut acceleration = vec![Vector3::zeros(); n];
 
         for t in 0..num_steps {
-            let current_step = Step::from_index(t, num_steps);
+            let current_step = Step::from_index(t, num_steps, self.sorting);
 
             self.step(time_step, theta, &mut acceleration, current_step);
 
