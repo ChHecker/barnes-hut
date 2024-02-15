@@ -56,14 +56,18 @@ pub enum Simulator {
 }
 
 impl Simulator {
-    fn calculate_accelerations<F: Float, P: Particle<F>>(
+    fn calculate_accelerations<F, P>(
         &self,
         accelerations: &mut [Vector3<F>],
         particles: &[P],
         theta: F,
         acceleration: &P::Acceleration,
         execution: Execution,
-    ) {
+    ) where
+        F: Float,
+        P: Particle<F> + Send + Sync,
+        P::Acceleration: Send + Sync,
+    {
         match self {
             Simulator::BarnesHut => BarnesHut::calculate_accelerations(
                 accelerations,
@@ -144,7 +148,8 @@ where
 impl<F, P, Q> Simulation<F, P, Q>
 where
     F: Float,
-    P: Particle<F>,
+    P: Particle<F> + Send + Sync,
+    P::Acceleration: Send + Sync,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
     pub fn new(particles: Q, acceleration: P::Acceleration) -> Self {

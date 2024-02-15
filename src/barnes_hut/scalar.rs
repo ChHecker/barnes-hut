@@ -18,7 +18,7 @@ where
     None,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BarnesHut<'a, F, P>
 where
     F: Float,
@@ -32,7 +32,8 @@ where
 impl<'a, F, P> BarnesHut<'a, F, P>
 where
     F: Float,
-    P: Particle<F>,
+    P: Particle<F> + Send + Sync,
+    P::Acceleration: Send + Sync,
 {
     pub fn new(particles: &'a [P], theta: F, acceleration: &'a P::Acceleration) -> Self {
         Self {
@@ -94,7 +95,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct ScalarNode<'a, F, P>
 where
     F: Float,

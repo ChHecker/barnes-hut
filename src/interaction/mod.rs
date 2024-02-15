@@ -1,8 +1,6 @@
 pub mod coulomb;
 pub mod gravity;
 
-use std::fmt::Debug;
-
 use nalgebra::Vector3;
 
 use crate::{barnes_hut::PointCharge, Float};
@@ -21,7 +19,7 @@ pub use simd::*;
 ///
 /// This can be for example the mass for gravity,
 /// or the electrical charge for the Coulomb force.
-pub trait Charge: Clone + Copy + Debug + Send + Sync {
+pub trait Charge: Clone + Copy + Send + Sync {
     /// The zero function for this type such that
     /// - it exerts no force on other particles
     /// - and for all charges C, $C + C::identity() = C$ holds.
@@ -35,7 +33,7 @@ impl<F: Float> Charge for F {
 }
 
 /// A general force.
-pub trait Acceleration<F: Float>: Clone + Debug + Send + Sync {
+pub trait Acceleration<F: Float> {
     type Charge: Charge;
     type Particle: Particle<F, Charge = Self::Charge, Acceleration = Self>;
 
@@ -50,7 +48,7 @@ pub trait Acceleration<F: Float>: Clone + Debug + Send + Sync {
 }
 
 /// A general particle.
-pub trait Particle<F: Float>: 'static + Clone + Debug + Send + Sync {
+pub trait Particle<F: Float> {
     type Charge: Charge;
     type Acceleration: Acceleration<F, Charge = Self::Charge, Particle = Self>;
 

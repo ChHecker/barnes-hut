@@ -9,7 +9,7 @@ use nalgebra::Vector3;
 pub struct Visualizer<F, P>
 where
     F: Float,
-    P: Particle<F> + 'static,
+    P: Particle<F> + Sync + Send + 'static,
 {
     engine: Engine,
     simulator: Simulation<F, P, Vec<P>>,
@@ -18,7 +18,8 @@ where
 impl<F, P> Visualizer<F, P>
 where
     F: Float,
-    P: Particle<F> + 'static,
+    P: Particle<F> + Sync + Send + 'static,
+    P::Acceleration: Send + Sync,
 {
     /// Create a new visualizer.
     ///
