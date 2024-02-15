@@ -66,9 +66,13 @@ where
                 let mut chunks = vec![accelerations.len() / num_threads; num_threads];
                 chunks[num_threads - 1] += particles.len() % num_threads;
 
-                for i in 0..num_threads {
-                    thread::scope(|s| {
-                        s.spawn(|| {
+                thread::scope(|s| {
+                    for i in 0..num_threads {
+                        let chunks = &chunks;
+                        let octree = &octree;
+                        let tx = &tx;
+
+                        s.spawn(move || {
                             let acc: Vec<_> = (0..chunks[i])
                                 .map(|j| {
                                     octree.calculate_acceleration(&particles[i * chunks[0] + j])
@@ -76,8 +80,8 @@ where
                                 .collect();
                             tx.send(acc).unwrap();
                         });
-                    });
-                }
+                    }
+                });
 
                 for acc in rx.iter().take(num_threads) {
                     for (i, a) in acc.into_iter().enumerate() {
