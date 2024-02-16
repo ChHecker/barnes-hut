@@ -1,4 +1,5 @@
 pub mod barnes_hut;
+pub mod brute_force;
 pub mod interaction;
 pub mod particle_creator;
 #[cfg(feature = "simd")]
@@ -56,6 +57,7 @@ pub enum Sorting {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Simulator {
+    BruteForce,
     BarnesHut,
     #[cfg(feature = "simd")]
     BarnesHutSimd,
@@ -75,6 +77,12 @@ impl Simulator {
         P::Acceleration: Send + Sync,
     {
         match self {
+            Simulator::BruteForce => brute_force::calculate_accelerations(
+                accelerations,
+                particles,
+                acceleration,
+                execution,
+            ),
             Simulator::BarnesHut => BarnesHut::calculate_accelerations(
                 accelerations,
                 particles,
@@ -174,6 +182,11 @@ where
             sorting: Sorting::None,
             phantom: PhantomData,
         }
+    }
+
+    pub fn brute_force(mut self) -> Self {
+        self.simulator = Simulator::BruteForce;
+        self
     }
 
     pub fn multithreaded(mut self, num_threads: usize) -> Self {
@@ -320,5 +333,39 @@ where
         }
 
         positions
+    }
+}
+
+#[cfg(test)]
+pub(crate) use tests::generate_random_particles;
+
+#[cfg(test)]
+mod tests {
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+
+    use self::interaction::gravity::GravitationalParticle;
+
+    use super::*;
+
+    pub(crate) fn generate_random_particles(n: usize) -> Vec<GravitationalParticle<f64>> {
+        let mut rng = StdRng::seed_from_u64(0);
+
+        (0..n)
+            .map(|_| {
+                GravitationalParticle::new(
+                    rng.gen_range(0.0..1e9),
+                    Vector3::new(
+                        rng.gen_range(-10.0..10.0),
+                        rng.gen_range(-10.0..10.0),
+                        rng.gen_range(-10.0..10.0),
+                    ),
+                    Vector3::new(
+                        rng.gen_range(-1.0..1.0),
+                        rng.gen_range(-1.0..1.0),
+                        rng.gen_range(-1.0..1.0),
+                    ),
+                )
+            })
+            .collect()
     }
 }
