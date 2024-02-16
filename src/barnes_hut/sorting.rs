@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use crate::{
@@ -7,8 +8,8 @@ use crate::{
 
 use super::{Node, ScalarNode};
 
-#[derive(Clone, Debug)]
-struct IndexParticle<'a, F, P>
+#[derive(Clone)]
+pub(crate) struct IndexParticle<'a, F, P>
 where
     F: Float,
     P: Particle<F>,
@@ -18,14 +19,55 @@ where
     phantom: PhantomData<F>,
 }
 
+impl<'a, F, P> IndexParticle<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    #[allow(unused)]
+    pub(crate) fn new(index: usize, particle: &'a P) -> Self {
+        Self {
+            particle,
+            index,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, F, P> Debug for IndexParticle<'a, F, P>
+where
+    F: Float,
+    P: Particle<F>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IndexParticle")
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug)]
-struct IndexAcceleration<'a, F, A>
+pub(crate) struct IndexAcceleration<'a, F, A>
 where
     F: Float,
     A: Acceleration<F>,
 {
     acceleration: A,
     phantom: PhantomData<&'a F>,
+}
+
+impl<'a, F, A> IndexAcceleration<'a, F, A>
+where
+    F: Float,
+    A: Acceleration<F>,
+{
+    #[allow(unused)]
+    pub(crate) fn new(acceleration: A) -> Self {
+        Self {
+            acceleration,
+            phantom: PhantomData,
+        }
+    }
 }
 
 impl<'a, F, A> Acceleration<F> for IndexAcceleration<'a, F, A>
@@ -117,6 +159,41 @@ where
     }
 }
 
+#[cfg(feature = "simd")]
+use crate::interaction::{SimdAcceleration, SimdParticle};
+
+#[cfg(feature = "simd")]
+impl<'a, F, A> SimdAcceleration<F> for IndexAcceleration<'a, F, A>
+where
+    F: Float,
+    A: SimdAcceleration<F>,
+    <A as Acceleration<F>>::Particle: 'a,
+{
+    type SimdCharge = A::Charge;
+
+    fn eval_simd(
+        &self,
+        particle1: &super::PointCharge<F, Self::Charge>,
+        particle2: &super::PointCharge<
+            <F>::Simd,
+            <<Self as SimdAcceleration<F>>::SimdCharge as crate::interaction::SimdCharge>::Simd,
+        >,
+    ) -> nalgebra::Vector3<<F>::Simd> {
+        self.acceleration.eval_simd(particle1, particle2)
+    }
+}
+
+#[cfg(feature = "simd")]
+impl<'a, F, P> SimdParticle<F> for IndexParticle<'a, F, P>
+where
+    F: Float,
+    P: SimdParticle<F>,
+{
+    type SimdCharge = P::Charge;
+
+    type SimdAcceleration = IndexAcceleration<'a, F, P::Acceleration>;
+}
+
 impl<'a, F, P> ScalarNode<'a, F, IndexParticle<'a, F, P>>
 where
     F: Float,
@@ -134,7 +211,6 @@ where
                 super::OptionalCharge::Point(_) => {
                     unreachable_debug!("node without subnodes, but point charge")
                 }
-                super::OptionalCharge::None => (),
             },
         }
     }
