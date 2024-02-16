@@ -59,7 +59,7 @@ where
                 let (tx, rx) = mpsc::channel();
 
                 let mut chunks: Vec<_> = (0..=num_threads)
-                    .map(|i| i * accelerations.len() / num_threads)
+                    .map(|i| i * (accelerations.len() / num_threads))
                     .collect();
                 chunks[num_threads] += particles.len() % num_threads;
 
