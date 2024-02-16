@@ -312,13 +312,13 @@ mod tests {
         let acc = GravitationalAcceleration::new(1e-5);
         let particles = generate_random_particles(50);
 
-        let mut bf = Simulation::new(particles.clone(), acc.clone()).brute_force();
-        let mut bh = Simulation::new(particles, acc);
+        let mut bf = Simulation::brute_force(particles.clone(), acc.clone());
+        let mut bh = Simulation::new(particles, acc, 0.);
 
         let mut acc_single = [Vector3::zeros(); 50];
-        bf.step(1., 0., &mut acc_single, Step::Middle);
+        bf.step(1., &mut acc_single, Step::Middle);
         let mut acc_multi = [Vector3::zeros(); 50];
-        bh.step(1., 0., &mut acc_multi, Step::Middle);
+        bh.step(1., &mut acc_multi, Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
             assert_abs_diff_eq!(s, m, epsilon = 1e-6);
@@ -330,13 +330,13 @@ mod tests {
         let acc = GravitationalAcceleration::new(1e-5);
         let particles = generate_random_particles(50);
 
-        let mut bh_single = Simulation::new(particles.clone(), acc.clone());
-        let mut bh_multi = Simulation::new(particles, acc).multithreaded(2);
+        let mut bh_single = Simulation::new(particles.clone(), acc.clone(), 0.);
+        let mut bh_multi = Simulation::new(particles, acc, 0.).multithreaded(2);
 
         let mut acc_single = [Vector3::zeros(); 50];
-        bh_single.step(1., 0., &mut acc_single, Step::Middle);
+        bh_single.step(1., &mut acc_single, Step::Middle);
         let mut acc_multi = [Vector3::zeros(); 50];
-        bh_multi.step(1., 0., &mut acc_multi, Step::Middle);
+        bh_multi.step(1., &mut acc_multi, Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
             assert_abs_diff_eq!(s, m, epsilon = 1e-6);
@@ -348,13 +348,13 @@ mod tests {
         let acc = GravitationalAcceleration::new(1e-5);
         let particles = generate_random_particles(50);
 
-        let mut bh_single = Simulation::new(particles.clone(), acc.clone());
-        let mut bh_rayon = Simulation::new(particles, acc).rayon();
+        let mut bh_single = Simulation::new(particles.clone(), acc.clone(), 0.);
+        let mut bh_rayon = Simulation::new(particles, acc, 0.).rayon();
 
         let mut acc_single = [Vector3::zeros(); 50];
-        bh_single.step(1., 0., &mut acc_single, Step::Middle);
+        bh_single.step(1., &mut acc_single, Step::Middle);
         let mut acc_multi = [Vector3::zeros(); 50];
-        bh_rayon.step(1., 0., &mut acc_multi, Step::Middle);
+        bh_rayon.step(1., &mut acc_multi, Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
             assert_abs_diff_eq!(s, m, epsilon = 1e-6);

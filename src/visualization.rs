@@ -54,11 +54,12 @@ where
         mut particle_creator: Pc,
         num_particles: u32,
         acceleration: P::Acceleration,
+        theta: F,
         width: u32,
         height: u32,
     ) -> anyhow::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
-        let barnes_hut = Simulation::new(particles, acceleration);
+        let barnes_hut = Simulation::new(particles, acceleration, theta);
 
         Self::new(barnes_hut, width, height)
     }
@@ -83,7 +84,7 @@ where
     /// # Arguments
     /// - `speed`: How much faster the simulation should run than real time.
     /// - `theta`: Barnes-Hut parameter to pass to [`BarnesHut::simulate()`].
-    pub fn visualize(mut self, speed: F, theta: F) -> anyhow::Result<()> {
+    pub fn visualize(mut self, speed: F) -> anyhow::Result<()> {
         let n = self.simulator.particles().len();
 
         let mut acceleration = vec![Vector3::zeros(); n];
@@ -94,8 +95,7 @@ where
         self.engine.update_loop(move |_, _, objects, _, _, _| {
             let step = F::from_f64(time.elapsed().as_secs_f64()).unwrap() * speed;
             println!("FPS: {}", 1. / time.elapsed().as_secs_f64());
-            self.simulator
-                .step(step, theta, &mut acceleration, current_step);
+            self.simulator.step(step, &mut acceleration, current_step);
 
             for (i, par) in self.simulator.particles().iter().enumerate() {
                 let pos = par.position();

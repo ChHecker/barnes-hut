@@ -19,7 +19,7 @@ fn main() {
             )
         })
         .collect::<Vec<_>>();
-    let mut bh = Simulation::new(particles, acceleration)
+    let mut bh = Simulation::new(particles, acceleration, 1.5)
         .simd()
         .sorting(100)
         .multithreaded(4);
@@ -34,6 +34,6 @@ fn main() {
             println!("{t} out of {num_steps} time steps done.");
         }
 
-        bh.step(0.1, 1.5, &mut acceleration, current_step);
+        bh.step(0.1, &mut acceleration, current_step);
     }
 }

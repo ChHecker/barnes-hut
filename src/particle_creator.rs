@@ -218,8 +218,8 @@ mod random {
             );
             let par = pc.create_particles(2);
 
-            let mut bh = Simulation::new(par, acc);
-            let pos = bh.simulate(0.1, num_steps, 0.);
+            let mut bh = Simulation::new(par, acc, 0.);
+            let pos = bh.simulate(0.1, num_steps);
 
             let last = pos.row(num_steps);
             for i in 0..3 {

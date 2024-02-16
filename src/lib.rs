@@ -56,23 +56,25 @@ pub enum Sorting {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Simulator {
+pub enum Simulator<F: Float> {
     BruteForce,
-    BarnesHut,
+    BarnesHut {
+        theta: F,
+    },
     #[cfg(feature = "simd")]
-    BarnesHutSimd,
+    BarnesHutSimd {
+        theta: F,
+    },
 }
 
-impl Simulator {
-    fn calculate_accelerations<F, P>(
+impl<F: Float> Simulator<F> {
+    fn calculate_accelerations<P>(
         &self,
         accelerations: &mut [Vector3<F>],
         particles: &[P],
-        theta: F,
         acceleration: &P::Acceleration,
         execution: Execution,
     ) where
-        F: Float,
         P: Particle<F> + Send + Sync,
         P::Acceleration: Send + Sync,
     {
@@ -83,18 +85,18 @@ impl Simulator {
                 acceleration,
                 execution,
             ),
-            Simulator::BarnesHut => BarnesHut::calculate_accelerations(
+            Simulator::BarnesHut { theta } => BarnesHut::calculate_accelerations(
                 accelerations,
                 particles,
-                theta,
+                *theta,
                 acceleration,
                 execution,
             ),
             #[cfg(feature = "simd")]
-            Simulator::BarnesHutSimd => BarnesHutSimd::calculate_accelerations(
+            Simulator::BarnesHutSimd { theta } => BarnesHutSimd::calculate_accelerations(
                 accelerations,
                 particles,
-                theta,
+                *theta,
                 acceleration,
                 execution,
             ),
@@ -144,7 +146,7 @@ impl Step {
 ///     }).collect();
 /// let acceleration = GravitationalAcceleration::new(1e-4);
 ///
-/// let mut bh = Simulation::barnes_hut(particles, acceleration);
+/// let mut bh = Simulation::new(particles, acceleration).simd().multithreaded(4);
 /// bh.simulate(
 ///     0.1,
 ///     100,
@@ -161,7 +163,7 @@ where
     particles: Q,
     acceleration: P::Acceleration,
     execution: Execution,
-    simulator: Simulator,
+    simulator: Simulator<F>,
     sorting: Sorting,
     phantom: PhantomData<P>,
 }
@@ -173,58 +175,60 @@ where
     P::Acceleration: Send + Sync,
     Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
 {
-    pub fn new(particles: Q, acceleration: P::Acceleration) -> Self {
+    pub fn new(particles: Q, acceleration: P::Acceleration, theta: F) -> Self {
         Self {
             particles,
             acceleration,
             execution: Execution::SingleThreaded,
-            simulator: Simulator::BarnesHut,
+            simulator: Simulator::BarnesHut { theta },
             sorting: Sorting::None,
             phantom: PhantomData,
         }
     }
 
-    pub fn brute_force(mut self) -> Self {
-        self.simulator = Simulator::BruteForce;
-        self
+    /// Use brute force calculation of the force.
+    pub fn brute_force(particles: Q, acceleration: P::Acceleration) -> Self {
+        Self {
+            particles,
+            acceleration,
+            execution: Execution::SingleThreaded,
+            simulator: Simulator::BruteForce,
+            sorting: Sorting::None,
+            phantom: PhantomData,
+        }
     }
 
+    /// Calculate the forces with multiple threads.
+    ///
+    /// Every thread gets its own tree with a part of the particles
+    /// and calculates for all particles the forces from its own tree.
     pub fn multithreaded(mut self, num_threads: usize) -> Self {
         self.execution = Execution::Multithreaded { num_threads };
         self
     }
 
-    /// Use multiple threads to calculate the forces.
+    /// Use Rayon to calculate the forces with multiple threads.
     ///
-    /// # Example
-    /// ```rust
-    /// # use nalgebra::Vector3;
-    /// # use barnes_hut::{Simulation, interaction::gravity::{GravitationalAcceleration, GravitationalParticle}};
-    /// let particles: Vec<_> = (0..1_000).map(|_| {
-    ///         GravitationalParticle::new(
-    ///             1e6,
-    ///             1000. * Vector3::new_random(),
-    ///             Vector3::new_random(),
-    ///         )
-    ///     }).collect();
-    /// let acceleration = GravitationalAcceleration::new(1e-4);
-    ///
-    /// let mut bh = Simulation::barnes_hut(particles, acceleration).multithreaded();
-    /// bh.simulate(
-    ///     0.1,
-    ///     100,
-    ///     1.5
-    /// );
-    /// ```
+    /// All threads calculate the forces from the shared tree, splitting the particles.
     #[cfg(feature = "rayon")]
     pub fn rayon(mut self) -> Self {
         self.execution = Execution::Rayon;
         self
     }
 
+    /// Store four particles per leaf and calculate the forces of all of them at once.
+    ///
+    /// This requires hardware support of four-wide double vectors.
+    /// The results in my testing were mixed, so this might or might not make it faster.
+    /// **Warning:** Not compatible with brute force!
     #[cfg(feature = "simd")]
     pub fn simd(mut self) -> Self {
-        self.simulator = Simulator::BarnesHutSimd;
+        let theta = match self.simulator {
+            Simulator::BruteForce => panic!("called simd on brute force simulation"),
+            Simulator::BarnesHut { theta } => theta,
+            Simulator::BarnesHutSimd { theta } => theta,
+        };
+        self.simulator = Simulator::BarnesHutSimd { theta };
         self
     }
 
@@ -240,21 +244,14 @@ where
         self.particles.as_ref()
     }
 
-    /// Do a single Barnes-Hut step.
+    /// Do a single simulation step.
     ///
     /// # Arguments
     /// - `time_step`: Size of each time step.
-    /// - `theta`: Theta parameter of the Barnes-Hut algorithm.
     /// - `acceleration`: The slice to store the accelerations in. Used to avoid allocations.
     /// - `current_step`: Whether the step is the first, last, or in between.
     ///     Used to do an Euler step in the beginning and end.
-    pub fn step(
-        &mut self,
-        time_step: F,
-        theta: F,
-        acceleration: &mut [Vector3<F>],
-        current_step: Step,
-    ) {
+    pub fn step(&mut self, time_step: F, acceleration: &mut [Vector3<F>], current_step: Step) {
         if let Step::Sort = current_step {
             sort_particles(self.particles.as_mut());
         }
@@ -262,7 +259,6 @@ where
         self.simulator.calculate_accelerations(
             acceleration,
             self.particles.as_ref(),
-            theta,
             &self.acceleration,
             self.execution,
         );
@@ -303,8 +299,7 @@ where
     /// # Arguments
     /// - `time_step`: Size of each time step.
     /// - `num_steps`: How many time steps to take.
-    /// - `theta`: Theta parameter of the Barnes-Hut algorithm.
-    pub fn simulate(&mut self, time_step: F, num_steps: usize, theta: F) -> DMatrix<Vector3<F>> {
+    pub fn simulate(&mut self, time_step: F, num_steps: usize) -> DMatrix<Vector3<F>> {
         assert!(time_step > F::from_f64(0.).unwrap());
         assert!(num_steps > 0);
 
@@ -320,7 +315,7 @@ where
         for t in 0..num_steps {
             let current_step = Step::from_index(t, num_steps, self.sorting);
 
-            self.step(time_step, theta, &mut acceleration, current_step);
+            self.step(time_step, &mut acceleration, current_step);
 
             for (par, pos) in self
                 .particles

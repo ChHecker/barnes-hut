@@ -17,9 +17,9 @@ This tries to be generic over the force and particle kind. The basic abstraction
 - In order to then start an N-body simulation, create a `Simulator` object with either a `Vec<Particle>` or `&mut [Particle]` and an `Acceleration`.
   - If you want to calculate the forces with multiple trees split over multiple threads, call `multithreaded(num_threads)` on it. \
     Recommendations: If you have performance and efficiency cores, choose the number of threads to be the number of your performance cores. If you have SMT, choose the number of threads to be only your number of physical cores. (In both cases, the performance overhead of firing up threads compensates or overshadows the advantage of more threads.)
-  - For multithreading using Rayon, call `rayon()`.
+  - For multithreading using Rayon, call `rayon()`. This should be generally slower than `multithreaded`.
   - For explicit SIMD support, call `simd()`. You might need to enable native optimization by setting the environment variable `RUSTFLAGS` to `-C target-cpu=native`. \
-    Note: While this results in a performance uplift on my M2, on my AMD R5 5600x, SIMD support does not seem to work. Your results may vary.
+    Note: While this results in a performance uplift on my M2, on my AMD R5 5600x, the performance does not change. Your results may vary.
 
   Then, you can run `simulate`.
 

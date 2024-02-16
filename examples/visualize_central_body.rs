@@ -15,6 +15,6 @@ fn main() {
     let pc = CentralBodyParticleCreator::new(1e10, uniform_mass, normal_rad);
 
     // Visualize.
-    let vis = Visualizer::from_particle_creator(pc, 2, acc, 1920, 1080).unwrap();
-    vis.visualize(SPEED, 1.5).unwrap();
+    let vis = Visualizer::from_particle_creator(pc, 2, acc, 0., 1920, 1080).unwrap();
+    vis.visualize(SPEED).unwrap();
 }

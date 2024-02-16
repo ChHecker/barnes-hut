@@ -24,9 +24,9 @@ fn particles(c: &mut Criterion) {
                             )
                         })
                         .collect::<Vec<_>>();
-                    Simulation::new(par, acc)
+                    Simulation::new(par, acc, 1.5)
                 },
-                |bh| bh.simulate(0.1, 10, 1.5),
+                |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
             )
         });
@@ -44,9 +44,9 @@ fn particles(c: &mut Criterion) {
                             )
                         })
                         .collect::<Vec<_>>();
-                    Simulation::new(par, acc).simd()
+                    Simulation::new(par, acc, 1.5).simd()
                 },
-                |bh| bh.simulate(0.1, 10, 1.5),
+                |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
             )
         });
@@ -67,9 +67,9 @@ fn particles(c: &mut Criterion) {
                                 )
                             })
                             .collect::<Vec<_>>();
-                        Simulation::new(par, acc).simd().multithreaded(4)
+                        Simulation::new(par, acc, 1.5).simd().multithreaded(4)
                     },
-                    |bh| bh.simulate(0.1, 10, 1.5),
+                    |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
                 )
             },
@@ -91,9 +91,9 @@ fn particles(c: &mut Criterion) {
                                 )
                             })
                             .collect::<Vec<_>>();
-                        Simulation::new(par, acc).simd().rayon()
+                        Simulation::new(par, acc, 1.5).simd().rayon()
                     },
-                    |bh| bh.simulate(0.1, 10, 1.5),
+                    |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
                 )
             },
@@ -119,16 +119,16 @@ fn theta(c: &mut Criterion) {
     for theta in [0., 1., 2.] {
         group.bench_with_input(BenchmarkId::new("scalar", theta), &theta, |b, &theta| {
             b.iter_batched_ref(
-                || Simulation::new(particles.clone(), acc.clone()),
-                |bh| bh.simulate(0.1, 10, theta),
+                || Simulation::new(particles.clone(), acc.clone(), theta),
+                |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
             )
         });
 
         group.bench_with_input(BenchmarkId::new("simd", theta), &theta, |b, &theta| {
             b.iter_batched_ref(
-                || Simulation::new(particles.clone(), acc.clone()).simd(),
-                |bh| bh.simulate(0.1, 10, theta),
+                || Simulation::new(particles.clone(), acc.clone(), theta).simd(),
+                |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
             )
         });
@@ -154,11 +154,11 @@ fn sorting(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("simd", n), &n, |b, &n| {
             b.iter_batched_ref(
                 || {
-                    Simulation::new(particles.clone(), acc.clone())
+                    Simulation::new(particles.clone(), acc.clone(), 1.5)
                         .simd()
                         .sorting(n)
                 },
-                |bh| bh.simulate(0.1, 1000, 1.5),
+                |bh| bh.simulate(0.1, 1000),
                 BatchSize::SmallInput,
             )
         });
@@ -183,8 +183,8 @@ fn optimization(c: &mut Criterion) {
 
     group.bench_function("standard", |b| {
         b.iter_batched_ref(
-            || Simulation::new(particles.clone(), acc.clone()),
-            |bh| bh.simulate(0.1, 1, 1.5),
+            || Simulation::new(particles.clone(), acc.clone(), 1.5),
+            |bh| bh.simulate(0.1, 1),
             BatchSize::SmallInput,
         )
     });
@@ -192,11 +192,12 @@ fn optimization(c: &mut Criterion) {
     group.bench_function("optimal", |b| {
         b.iter_batched_ref(
             || {
-                Simulation::new(particles.clone(), acc.clone())
+                Simulation::new(particles.clone(), acc.clone(), 1.5)
                     .simd()
                     .sorting(1)
+                    .multithreaded(4)
             },
-            |bh| bh.simulate(0.1, 1, 1.5),
+            |bh| bh.simulate(0.1, 1),
             BatchSize::SmallInput,
         )
     });

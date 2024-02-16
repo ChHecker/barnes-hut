@@ -203,10 +203,10 @@ mod tests {
             CoulombParticle::new(1e10, 1., Vector3::new(1., 0., 0.), Vector3::zeros()),
             CoulombParticle::new(1e10, 1., Vector3::new(-1., 0., 0.), Vector3::zeros()),
         ];
-        let mut bh = Simulation::new(particles, acc);
+        let mut bh = Simulation::new(particles, acc, 0.);
 
         let num_steps = 5;
-        let positions = bh.simulate(1., num_steps, 1.5);
+        let positions = bh.simulate(1., num_steps);
 
         dbg!(positions.shape());
 
@@ -239,11 +239,11 @@ mod tests {
             })
             .collect();
 
-        let mut brute_force = Simulation::new(particles.clone(), acceleration.clone());
-        let mut barnes_hut = Simulation::new(particles, acceleration);
+        let mut brute_force = Simulation::brute_force(particles.clone(), acceleration.clone());
+        let mut barnes_hut = Simulation::new(particles, acceleration, 1.5);
 
-        let pos_bf = brute_force.simulate(0.1, 10, 0.);
-        let pos_bh = barnes_hut.simulate(0.1, 10, 1.5);
+        let pos_bf = brute_force.simulate(0.1, 10);
+        let pos_bh = barnes_hut.simulate(0.1, 10);
 
         let epsilon = 1.;
         for (p_bf, p_bh) in pos_bf.iter().zip(pos_bh.iter()) {
