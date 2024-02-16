@@ -19,7 +19,10 @@ fn main() {
             )
         })
         .collect::<Vec<_>>();
-    let mut bh = Simulation::new(particles, acceleration).simd();
+    let mut bh = Simulation::new(particles, acceleration)
+        .simd()
+        .sorting(100)
+        .multithreaded(4);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];
 

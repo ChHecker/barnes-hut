@@ -22,8 +22,6 @@ fn main() {
 
     // Visualize.
     let vis: Visualizer<f32, GravitationalParticle<f32>> =
-        Visualizer::from_particle_creator(pc, 1000, acc, 1920, 1080)
-            .unwrap()
-            .simd();
+        Visualizer::from_particle_creator(pc, 200, acc, 1920, 1080).unwrap();
     vis.visualize(SPEED, 1.5).unwrap();
 }
