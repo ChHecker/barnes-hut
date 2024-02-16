@@ -63,7 +63,12 @@ where
         Self::new(barnes_hut, width, height)
     }
 
-    pub fn multithreaded(mut self) -> Self {
+    pub fn multithreaded(mut self, num_threads: usize) -> Self {
+        self.simulator = self.simulator.multithreaded(num_threads);
+        self
+    }
+
+    pub fn rayon(mut self) -> Self {
         self.simulator = self.simulator.rayon();
         self
     }
