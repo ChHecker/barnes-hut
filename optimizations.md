@@ -6,4 +6,4 @@ All optimizations tested on an Apple M2 (4 P cores @ 3.49 GHz, 4 E cores @ 2.4 G
 - Explicit SIMD by saving four particles per node instead of one and then calculating the force vectorized (100k particles: ~20%)
 - Sort particles by depth-first search every $n$ iterations (100k particles with SIMD: ~30%)
 - Multithreading using Rayon: one shared tree, probe forces using multiple threads (100k particles with SIMD: ~30%)
-- Manual multithreading: one tree per thread, every thread calculates forces for all particles (100k particles with SIMD and 8 threads: ~45%)
+- Manual multithreading: one tree per thread, every thread calculates forces for all particles (100k particles with SIMD : ~50% (both at 4 and 8 threads, probably because the overhead of firing up more threads and using much slower efficiency cores compensate for higher parallelism))
