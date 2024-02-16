@@ -15,7 +15,6 @@ where
 {
     Particle(&'a P),
     Point(PointCharge<F, P::Charge>),
-    None,
 }
 
 #[derive(Clone)]
@@ -63,29 +62,40 @@ where
             }),
             Execution::Multithreaded { num_threads } => {
                 let (tx, rx) = mpsc::channel();
-                let mut chunks = vec![accelerations.len() / num_threads; num_threads];
-                chunks[num_threads - 1] += particles.len() % num_threads;
+
+                let mut chunks: Vec<_> = (0..=num_threads)
+                    .map(|i| i * accelerations.len() / num_threads)
+                    .collect();
+                chunks[num_threads] += particles.len() % num_threads;
+
+                let local_particles: Vec<_> = (0..num_threads)
+                    .map(|i| &particles[chunks[i]..chunks[i + 1]])
+                    .collect();
 
                 thread::scope(|s| {
                     for i in 0..num_threads {
-                        let chunks = &chunks;
-                        let octree = &octree;
                         let tx = &tx;
+                        let local_particles = local_particles[i];
 
                         s.spawn(move || {
-                            let acc: Vec<_> = (0..chunks[i])
-                                .map(|j| {
-                                    octree.calculate_acceleration(&particles[i * chunks[0] + j])
-                                })
+                            let octree = Self::new(local_particles, theta, acceleration);
+
+                            let acc: Vec<_> = particles
+                                .iter()
+                                .map(|p| octree.calculate_acceleration(p))
                                 .collect();
                             tx.send(acc).unwrap();
                         });
                     }
                 });
 
+                for a in accelerations.iter_mut() {
+                    *a = Vector3::zeros();
+                }
+
                 for acc in rx.iter().take(num_threads) {
                     for (i, a) in acc.into_iter().enumerate() {
-                        accelerations[i] = a;
+                        accelerations[i] += a;
                     }
                 }
             }
@@ -121,9 +131,10 @@ where
 
         // Create subnode for previous particle
         let previous_index = Self::choose_subnode(&self.center, previous_particle.position());
-        let mut previous_node = ScalarNode::new(
+        let previous_node = ScalarNode::new(
             Self::center_from_subnode(self.width, self.center, previous_index),
             self.width / F::from_f64(2.).unwrap(),
+            previous_particle,
         );
 
         let new_index = Self::choose_subnode(&self.center, new_particle.position());
@@ -131,16 +142,13 @@ where
         // (self.insert_particle would crash because one node wouldn't have a mass yet)
         // Otherwise, call insert on self below so self can be subdivided again
         if new_index != previous_index {
-            let mut new_node = ScalarNode::new(
+            let new_node = ScalarNode::new(
                 Self::center_from_subnode(self.width, self.center, new_index),
                 self.width / F::from_f64(2.).unwrap(),
+                new_particle,
             );
             // Insert new particle
-            new_node.charge = OptionalCharge::Particle(new_particle);
             new_nodes[new_index] = Some(new_node);
-
-            // Insert previous particle
-            previous_node.charge = OptionalCharge::Particle(previous_particle);
         }
         new_nodes[previous_index] = Some(previous_node);
 
@@ -148,7 +156,6 @@ where
 
         // If particles belong in the same cell, call insert on self so self can be subdivided again
         if previous_index == new_index {
-            self.insert_particle(previous_particle);
             self.insert_particle(new_particle);
         }
         self.calculate_charge();
@@ -160,10 +167,10 @@ where
     F: Float,
     P: Particle<F>,
 {
-    fn new(center: Vector3<F>, width: F) -> Self {
+    fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self {
         Self {
             subnodes: None,
-            charge: OptionalCharge::None,
+            charge: OptionalCharge::Particle(particle),
             center,
             width,
         }
@@ -175,13 +182,16 @@ where
             Some(subnodes) => {
                 let new_subnode = Self::choose_subnode(&self.center, particle.position());
 
-                let node = subnodes[new_subnode].get_or_insert_with(|| {
-                    ScalarNode::new(
-                        Self::center_from_subnode(self.width, self.center, new_subnode),
-                        self.width / F::from_f64(2.).unwrap(),
-                    )
-                });
-                node.insert_particle(particle);
+                match &mut subnodes[new_subnode] {
+                    Some(subnode) => subnode.insert_particle(particle),
+                    None => {
+                        subnodes[new_subnode] = Some(ScalarNode::new(
+                            Self::center_from_subnode(self.width, self.center, new_subnode),
+                            self.width / F::from_f64(2.).unwrap(),
+                            particle,
+                        ))
+                    }
+                }
 
                 self.calculate_charge();
             }
@@ -195,11 +205,6 @@ where
 
                 OptionalCharge::Point(_) => {
                     unreachable_debug!("leaves without a particle shouldn't exist")
-                }
-
-                // Self doesn't contain a particle, add mass of particle
-                OptionalCharge::None => {
-                    self.charge = OptionalCharge::Particle(particle);
                 }
             },
         }
@@ -215,7 +220,6 @@ where
                         (&charge.mass, &charge.charge, &charge.position)
                     }
                     OptionalCharge::Particle(par) => (par.mass(), par.charge(), par.position()),
-                    OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
                     (F::zero(), P::Charge::zero(), Vector3::zeros()),
@@ -267,11 +271,93 @@ where
 
                 acc += acceleration.eval(particle.point_charge(), particle2.point_charge())
             }
-            OptionalCharge::None => {
-                unreachable_debug!("nodes without a charge or particle shouldn't exist")
-            }
         }
 
         acc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_abs_diff_eq;
+
+    use super::*;
+    use crate::{
+        generate_random_particles,
+        interaction::gravity::{GravitationalAcceleration, GravitationalParticle},
+        Simulation, Step,
+    };
+
+    #[test]
+    fn symmetry() {
+        let particle1 = GravitationalParticle::new(1e6, Vector3::new(1., 0., 0.), Vector3::zeros());
+        let particle2 =
+            GravitationalParticle::new(1e6, Vector3::new(-1., 0., 0.), Vector3::zeros());
+        let acc = GravitationalAcceleration::new(0.);
+
+        let mut accs = vec![Vector3::zeros(); 2];
+        BarnesHut::calculate_accelerations(
+            &mut accs,
+            &[particle1, particle2],
+            0.,
+            &acc,
+            Execution::SingleThreaded,
+        );
+
+        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
+    }
+
+    #[test]
+    fn brute_force() {
+        let acc = GravitationalAcceleration::new(1e-5);
+        let particles = generate_random_particles(50);
+
+        let mut bf = Simulation::new(particles.clone(), acc.clone()).brute_force();
+        let mut bh = Simulation::new(particles, acc);
+
+        let mut acc_single = [Vector3::zeros(); 50];
+        bf.step(1., 0., &mut acc_single, Step::Middle);
+        let mut acc_multi = [Vector3::zeros(); 50];
+        bh.step(1., 0., &mut acc_multi, Step::Middle);
+
+        for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+        }
+    }
+
+    #[test]
+    fn multithreaded() {
+        let acc = GravitationalAcceleration::new(1e-5);
+        let particles = generate_random_particles(50);
+
+        let mut bh_single = Simulation::new(particles.clone(), acc.clone());
+        let mut bh_multi = Simulation::new(particles, acc).multithreaded(2);
+
+        let mut acc_single = [Vector3::zeros(); 50];
+        bh_single.step(1., 0., &mut acc_single, Step::Middle);
+        let mut acc_multi = [Vector3::zeros(); 50];
+        bh_multi.step(1., 0., &mut acc_multi, Step::Middle);
+
+        for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+        }
+    }
+
+    #[test]
+    fn rayon() {
+        let acc = GravitationalAcceleration::new(1e-5);
+        let particles = generate_random_particles(50);
+
+        let mut bh_single = Simulation::new(particles.clone(), acc.clone());
+        let mut bh_rayon = Simulation::new(particles, acc).rayon();
+
+        let mut acc_single = [Vector3::zeros(); 50];
+        bh_single.step(1., 0., &mut acc_single, Step::Middle);
+        let mut acc_multi = [Vector3::zeros(); 50];
+        bh_rayon.step(1., 0., &mut acc_multi, Step::Middle);
+
+        for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+        }
     }
 }

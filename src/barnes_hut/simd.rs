@@ -48,42 +48,55 @@ where
         acceleration: &'b P::Acceleration,
         execution: Execution,
     ) {
-        let octree = Self::new(particles, theta, acceleration);
-
         match execution {
-            Execution::SingleThreaded => accelerations.iter_mut().enumerate().for_each(|(i, a)| {
-                *a = octree.calculate_acceleration(&particles[i]);
-            }),
+            Execution::SingleThreaded => {
+                let octree = Self::new(particles, theta, acceleration);
+                accelerations.iter_mut().enumerate().for_each(|(i, a)| {
+                    *a = octree.calculate_acceleration(&particles[i]);
+                });
+            }
             Execution::Multithreaded { num_threads } => {
                 let (tx, rx) = mpsc::channel();
-                let mut chunks = vec![accelerations.len() / num_threads; num_threads];
-                chunks[num_threads - 1] += particles.len() % num_threads;
+
+                let mut chunks: Vec<_> = (0..=num_threads)
+                    .map(|i| i * accelerations.len() / num_threads)
+                    .collect();
+                chunks[num_threads] += particles.len() % num_threads;
+
+                let local_particles: Vec<_> = (0..num_threads)
+                    .map(|i| &particles[chunks[i]..chunks[i + 1]])
+                    .collect();
 
                 thread::scope(|s| {
                     for i in 0..num_threads {
-                        let chunks = &chunks;
-                        let octree = &octree;
                         let tx = &tx;
+                        let local_particles = local_particles[i];
 
                         s.spawn(move || {
-                            let acc: Vec<_> = (0..chunks[i])
-                                .map(|j| {
-                                    octree.calculate_acceleration(&particles[i * chunks[0] + j])
-                                })
+                            let octree = Self::new(local_particles, theta, acceleration);
+
+                            let acc: Vec<_> = particles
+                                .iter()
+                                .map(|p| octree.calculate_acceleration(p))
                                 .collect();
                             tx.send(acc).unwrap();
                         });
                     }
                 });
 
+                for a in accelerations.iter_mut() {
+                    *a = Vector3::zeros();
+                }
+
                 for acc in rx.iter().take(num_threads) {
                     for (i, a) in acc.into_iter().enumerate() {
-                        accelerations[i] = a;
+                        accelerations[i] += a;
                     }
                 }
             }
             #[cfg(feature = "rayon")]
             Execution::Rayon => {
+                let octree = Self::new(particles, theta, acceleration);
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
                     *a = octree.calculate_acceleration(&particles[i]);
                 });
@@ -92,7 +105,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct ParticleArray<'a, F, P>
 where
     F: Float,
@@ -101,6 +114,20 @@ where
     arr: [Option<&'a P>; 4],
     len: usize,
     phantom: PhantomData<F>,
+}
+
+impl<'a, F, P> Clone for ParticleArray<'a, F, P>
+where
+    F: Float,
+    P: SimdParticle<F>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            arr: self.arr,
+            len: self.len,
+            phantom: self.phantom,
+        }
+    }
 }
 
 impl<'a, F, P> ParticleArray<'a, F, P>
@@ -127,7 +154,7 @@ where
             return false;
         }
 
-        self.arr[self.len() - 1] = Some(value);
+        self.arr[self.len()] = Some(value);
         self.len += 1;
 
         true
@@ -150,9 +177,7 @@ where
     ) -> PointCharge<F::Simd, <<P as SimdParticle<F>>::SimdCharge as SimdCharge>::Simd> {
         let mut mass = [F::zero(); 4];
         let mut charge = [P::Charge::zero(); 4];
-        let mut position: Vector3<F::Simd> =
-            // Vector3::from_element(F::Simd::splat(F::from_f64(f64::INFINITY).unwrap()));
-            Vector3::zeros();
+        let mut position: Vector3<F::Simd> = Vector3::zeros();
         for (i, par) in self.arr.iter().flatten().enumerate() {
             let pc = par.point_charge();
             mass[i] = pc.mass;
@@ -192,7 +217,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum OptionalCharge<'a, F, P>
 where
     F: Float,
@@ -200,18 +225,18 @@ where
 {
     Particle(ParticleArray<'a, F, P>),
     Point(PointCharge<F, P::Charge>),
-    None,
 }
 
-impl<'a, F, P> OptionalCharge<'a, F, P>
+impl<'a, F, P> Clone for OptionalCharge<'a, F, P>
 where
     F: Float,
     P: SimdParticle<F>,
 {
-    fn take(&mut self) -> Self {
-        let mut ret = OptionalCharge::None;
-        std::mem::swap(&mut ret, self);
-        ret
+    fn clone(&self) -> Self {
+        match self {
+            Self::Particle(arr) => Self::Particle(arr.clone()),
+            Self::Point(charge) => Self::Point(charge.clone()),
+        }
     }
 }
 
@@ -239,24 +264,32 @@ where
             }
         }
 
-        if let OptionalCharge::Particle(previous_particles) = self.charge.take() {
-            let mut new_nodes: Subnodes<Self> = Default::default();
+        match &self.charge {
+            OptionalCharge::Particle(previous_particles) => {
+                let previous_particles = previous_particles.clone();
 
-            let new_index = Self::choose_subnode(&self.center, new_particle.position());
-            let mut new_node = SimdNode::new(
-                Self::center_from_subnode(self.width, self.center, new_index),
-                self.width / F::from_f64(2.).unwrap(),
-            );
-            // Insert new particle
-            new_node.charge = OptionalCharge::Particle(ParticleArray::from_particle(new_particle));
-            new_nodes[new_index] = Some(new_node);
+                let mut new_nodes: Subnodes<Self> = Default::default();
 
-            self.subnodes = Some(Box::new(new_nodes));
+                let new_index = Self::choose_subnode(&self.center, new_particle.position());
+                let new_node = SimdNode::new(
+                    Self::center_from_subnode(self.width, self.center, new_index),
+                    self.width / F::from_f64(2.).unwrap(),
+                    new_particle,
+                );
+                // Insert new particle
+                new_nodes[new_index] = Some(new_node);
 
-            for particle in previous_particles.iter().flatten() {
-                self.insert_particle(particle);
+                self.subnodes = Some(Box::new(new_nodes));
+
+                for particle in previous_particles.iter().flatten() {
+                    self.insert_particle(particle);
+                }
+
+                self.calculate_charge();
             }
-            self.calculate_charge();
+            OptionalCharge::Point(_) => {
+                unreachable_debug!("leaves without a particle shouldn't exist");
+            }
         }
     }
 }
@@ -266,10 +299,10 @@ where
     F: Float,
     P: SimdParticle<F>,
 {
-    fn new(center: Vector3<F>, width: F) -> Self {
+    fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self {
         Self {
             subnodes: None,
-            charge: OptionalCharge::None,
+            charge: OptionalCharge::Particle(ParticleArray::from_particle(particle)),
             center,
             width,
         }
@@ -281,13 +314,16 @@ where
             Some(subnodes) => {
                 let new_subnode = Self::choose_subnode(&self.center, particle.position());
 
-                let node = subnodes[new_subnode].get_or_insert_with(|| {
-                    SimdNode::new(
-                        Self::center_from_subnode(self.width, self.center, new_subnode),
-                        self.width / F::from_f64(2.).unwrap(),
-                    )
-                });
-                node.insert_particle(particle);
+                match &mut subnodes[new_subnode] {
+                    Some(subnode) => subnode.insert_particle(particle),
+                    None => {
+                        subnodes[new_subnode] = Some(SimdNode::new(
+                            Self::center_from_subnode(self.width, self.center, new_subnode),
+                            self.width / F::from_f64(2.).unwrap(),
+                            particle,
+                        ))
+                    }
+                }
 
                 self.calculate_charge();
             }
@@ -302,11 +338,6 @@ where
                 OptionalCharge::Point(_) => {
                     unreachable_debug!("leaves without a particle shouldn't exist")
                 }
-
-                // Self doesn't contain a particle, add mass of particle
-                OptionalCharge::None => {
-                    self.charge = OptionalCharge::Particle(ParticleArray::from_particle(particle));
-                }
             },
         }
     }
@@ -319,7 +350,6 @@ where
                 .map(|node| match &node.charge {
                     OptionalCharge::Point(charge) => (charge.mass, charge.charge, charge.position),
                     OptionalCharge::Particle(par) => par.center_of_charge_and_mass(),
-                    OptionalCharge::None => unreachable!("nodes should always have a mass"),
                 })
                 .fold(
                     (F::zero(), P::Charge::zero(), Vector3::zeros()),
@@ -379,11 +409,93 @@ where
                     .map(|elem| same.if_else(|| F::Simd::splat(F::zero()), || elem))
                     .map(|elem| elem.simd_horizontal_sum());
             }
-            OptionalCharge::None => {
-                unreachable_debug!("nodes without a charge or particle shouldn't exist")
-            }
         }
 
         acc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_abs_diff_eq;
+
+    use super::*;
+    use crate::{
+        generate_random_particles,
+        interaction::gravity::{GravitationalAcceleration, GravitationalParticle},
+        Simulation, Step,
+    };
+
+    #[test]
+    fn symmetry() {
+        let particle1 = GravitationalParticle::new(1e6, Vector3::new(1., 0., 0.), Vector3::zeros());
+        let particle2 =
+            GravitationalParticle::new(1e6, Vector3::new(-1., 0., 0.), Vector3::zeros());
+        let acc = GravitationalAcceleration::new(0.);
+
+        let mut accs = vec![Vector3::zeros(); 2];
+        BarnesHutSimd::calculate_accelerations(
+            &mut accs,
+            &[particle1, particle2],
+            0.,
+            &acc,
+            Execution::SingleThreaded,
+        );
+
+        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
+    }
+
+    #[test]
+    fn simd() {
+        let acc = GravitationalAcceleration::new(1e-5);
+        let particles = generate_random_particles(50);
+
+        let mut bh_scalar = Simulation::new(particles.clone(), acc.clone());
+        let mut bh_simd = Simulation::new(particles, acc).simd();
+
+        let mut acc_scalar = [Vector3::zeros(); 50];
+        bh_scalar.step(1., 0., &mut acc_scalar, Step::Middle);
+        let mut acc_simd = [Vector3::zeros(); 50];
+        bh_simd.step(1., 0., &mut acc_simd, Step::Middle);
+
+        for (s, m) in acc_scalar.into_iter().zip(acc_simd) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn multithreaded() {
+        let acc = GravitationalAcceleration::new(1e-5);
+        let particles = generate_random_particles(50);
+
+        let mut bh_scalar = Simulation::new(particles.clone(), acc.clone());
+        let mut bh_simd = Simulation::new(particles, acc).simd().multithreaded(2);
+
+        let mut acc_scalar = [Vector3::zeros(); 50];
+        bh_scalar.step(1., 0., &mut acc_scalar, Step::Middle);
+        let mut acc_simd = [Vector3::zeros(); 50];
+        bh_simd.step(1., 0., &mut acc_simd, Step::Middle);
+
+        for (s, m) in acc_scalar.into_iter().zip(acc_simd) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn rayon() {
+        let acc = GravitationalAcceleration::new(1e-5);
+        let particles = generate_random_particles(50);
+
+        let mut bh_scalar = Simulation::new(particles.clone(), acc.clone());
+        let mut bh_simd = Simulation::new(particles, acc).simd().rayon();
+
+        let mut acc_scalar = [Vector3::zeros(); 50];
+        bh_scalar.step(1., 0., &mut acc_scalar, Step::Middle);
+        let mut acc_simd = [Vector3::zeros(); 50];
+        bh_simd.step(1., 0., &mut acc_simd, Step::Middle);
+
+        for (s, m) in acc_scalar.into_iter().zip(acc_simd) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-9);
+        }
     }
 }

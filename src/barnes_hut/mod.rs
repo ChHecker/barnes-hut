@@ -60,12 +60,12 @@ where
     F: Float,
     P: Particle<F>,
 {
-    fn new(center: Vector3<F>, width: F) -> Self;
+    fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self;
 
     fn from_particles(particles: &'a [P]) -> Self {
         let mut v_min = Vector3::zeros();
         let mut v_max = Vector3::zeros();
-        for particle in particles.as_ref().iter() {
+        for particle in particles.iter() {
             for (i, elem) in particle.position().iter().enumerate() {
                 if *elem > v_max[i] {
                     v_max[i] = *elem;
@@ -78,9 +78,9 @@ where
         let width = (v_max - v_min).max();
         let center = v_min + v_max / F::from_f64(2.).unwrap();
 
-        let mut node = Self::new(center, width);
+        let mut node = Self::new(center, width, &particles[0]);
 
-        for particle in particles.iter() {
+        for particle in particles.iter().skip(1) {
             node.insert_particle(particle);
         }
 
