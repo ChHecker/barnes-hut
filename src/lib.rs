@@ -12,7 +12,7 @@ mod csv;
 
 use std::marker::PhantomData;
 
-use barnes_hut::{sorting::sort_particles, BarnesHut};
+use barnes_hut::BarnesHut;
 use nalgebra::{DMatrix, RealField, Vector3};
 
 #[cfg(not(feature = "simd"))]
@@ -74,6 +74,7 @@ impl<F: Float> Simulator<F> {
         particles: &[P],
         acceleration: &P::Acceleration,
         execution: Execution,
+        sorting: Option<&mut Vec<u32>>,
     ) where
         P: Particle<F> + Send + Sync,
         P::Acceleration: Send + Sync,
@@ -91,6 +92,7 @@ impl<F: Float> Simulator<F> {
                 *theta,
                 acceleration,
                 execution,
+                sorting,
             ),
             #[cfg(feature = "simd")]
             Simulator::BarnesHutSimd { theta } => BarnesHutSimd::calculate_accelerations(
@@ -99,6 +101,7 @@ impl<F: Float> Simulator<F> {
                 *theta,
                 acceleration,
                 execution,
+                sorting,
             ),
         }
     }
@@ -146,11 +149,10 @@ impl Step {
 ///     }).collect();
 /// let acceleration = GravitationalAcceleration::new(1e-4);
 ///
-/// let mut bh = Simulation::new(particles, acceleration).simd().multithreaded(4);
+/// let mut bh = Simulation::new(particles, acceleration, 1.5).simd().multithreaded(4);
 /// bh.simulate(
 ///     0.1,
-///     100,
-///     1.5
+///     100
 /// );
 /// ```
 #[derive(Debug)]
@@ -244,6 +246,25 @@ where
         self.particles.as_ref()
     }
 
+    fn sort_particles(&mut self, mut sorting: Vec<u32>) {
+        for idx in 0..self.particles.as_ref().len() {
+            if sorting[idx] != idx as u32 {
+                let mut current_idx = idx;
+                loop {
+                    let target_idx = sorting[current_idx];
+                    sorting[current_idx] = current_idx as u32;
+                    if sorting[target_idx as usize] == target_idx {
+                        break;
+                    }
+                    self.particles
+                        .as_mut()
+                        .swap(current_idx, target_idx as usize);
+                    current_idx = target_idx as usize;
+                }
+            }
+        }
+    }
+
     /// Do a single simulation step.
     ///
     /// # Arguments
@@ -252,15 +273,17 @@ where
     /// - `current_step`: Whether the step is the first, last, or in between.
     ///     Used to do an Euler step in the beginning and end.
     pub fn step(&mut self, time_step: F, acceleration: &mut [Vector3<F>], current_step: Step) {
-        if let Step::Sort = current_step {
-            sort_particles(self.particles.as_mut());
-        }
+        let mut sorting = match current_step {
+            Step::Sort => Some(Vec::with_capacity(self.particles.as_ref().len())),
+            _ => None,
+        };
 
         self.simulator.calculate_accelerations(
             acceleration,
             self.particles.as_ref(),
             &self.acceleration,
             self.execution,
+            sorting.as_mut(),
         );
 
         /*
@@ -288,6 +311,10 @@ where
             if let Step::Last = current_step {
                 *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
             }
+        }
+
+        if let Some(sorting) = sorting {
+            self.sort_particles(sorting);
         }
     }
 

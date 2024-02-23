@@ -27,8 +27,6 @@ mod simd;
 #[cfg(feature = "simd")]
 pub use simd::*;
 
-pub mod sorting;
-
 #[derive(Clone, Debug)]
 pub struct PointCharge<S, C>
 where
@@ -54,15 +52,15 @@ where
 
 type Subnodes<N> = [Option<N>; 8];
 
-trait Node<'a, F, P>
+trait Node<F, P>
 where
     Self: Sized,
     F: Float,
     P: Particle<F>,
 {
-    fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self;
+    fn new(center: Vector3<F>, width: F, particle_idx: u32) -> Self;
 
-    fn from_particles(particles: &'a [P]) -> Self {
+    fn from_particles(particles: &[P]) -> Self {
         let mut v_min = Vector3::zeros();
         let mut v_max = Vector3::zeros();
         for particle in particles.iter() {
@@ -78,27 +76,30 @@ where
         let width = (v_max - v_min).max();
         let center = v_min + v_max / F::from_f64(2.).unwrap();
 
-        let mut node = Self::new(center, width, &particles[0]);
+        let mut node = Self::new(center, width, 0);
 
-        for particle in particles.iter().skip(1) {
-            node.insert_particle(particle);
+        for idx in 1..particles.len() {
+            node.insert_particle(idx as u32, particles);
         }
 
-        node.calculate_charge();
+        node.calculate_charge(particles);
 
         node
     }
 
-    fn insert_particle(&mut self, particle: &'a P);
+    fn insert_particle(&mut self, idx: u32, particles: &[P]);
 
-    fn calculate_charge(&mut self);
+    fn calculate_charge(&mut self, particles: &[P]);
 
     fn calculate_acceleration(
         &self,
         particle: &P,
+        particles: &[P],
         acceleration: &P::Acceleration,
         theta: F,
     ) -> Vector3<F>;
+
+    fn dfs(&self, indices: &mut Vec<u32>);
 
     fn choose_subnode(center: &Vector3<F>, position: &Vector3<F>) -> usize {
         if position.x > center.x {

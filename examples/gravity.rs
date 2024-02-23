@@ -9,7 +9,7 @@ fn main() {
     let mut rng = StdRng::seed_from_u64(0);
 
     let acceleration = GravitationalAcceleration::new(1e-5);
-    let num_pars = 100_000;
+    let num_pars = 1_000;
     let particles = (0..num_pars)
         .map(|_| {
             GravitationalParticle::new(
@@ -19,10 +19,9 @@ fn main() {
             )
         })
         .collect::<Vec<_>>();
-    let mut bh = Simulation::new(particles, acceleration, 1.5)
-        .simd()
-        .sorting(100)
-        .multithreaded(4);
+    let mut bh = Simulation::new(particles, acceleration, 1.5);
+    // .sorting(100)
+    // .multithreaded(4);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];
 

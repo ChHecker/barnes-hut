@@ -8,12 +8,12 @@ use crate::Execution;
 use super::*;
 
 #[derive(Clone, Debug)]
-pub(super) enum OptionalCharge<'a, F, P>
+pub(super) enum OptionalCharge<F, P>
 where
     F: Float,
     P: Particle<F>,
 {
-    Particle(&'a P),
+    Particle(u32),
     Point(PointCharge<F, P::Charge>),
 }
 
@@ -23,7 +23,7 @@ where
     F: Float,
     P: Particle<F>,
 {
-    root: ScalarNode<'a, F, P>,
+    root: ScalarNode<F, P>,
     theta: F,
     acceleration: &'a P::Acceleration,
 }
@@ -42,9 +42,9 @@ where
         }
     }
 
-    pub fn calculate_acceleration(&self, particle: &P) -> Vector3<F> {
+    pub fn calculate_acceleration(&self, particle: &P, particles: &[P]) -> Vector3<F> {
         self.root
-            .calculate_acceleration(particle, self.acceleration, self.theta)
+            .calculate_acceleration(particle, particles, self.acceleration, self.theta)
     }
 
     pub fn calculate_accelerations<'b: 'a>(
@@ -53,15 +53,21 @@ where
         theta: F,
         acceleration: &'b P::Acceleration,
         execution: Execution,
+        sorting: Option<&mut Vec<u32>>,
     ) {
-        let octree = Self::new(particles, theta, acceleration);
-
         match execution {
-            Execution::SingleThreaded => accelerations.iter_mut().enumerate().for_each(|(i, a)| {
-                *a = octree.calculate_acceleration(&particles[i]);
-            }),
+            Execution::SingleThreaded => {
+                let octree = Self::new(particles, theta, acceleration);
+                accelerations.iter_mut().enumerate().for_each(|(i, a)| {
+                    *a = octree.calculate_acceleration(&particles[i], particles);
+                });
+                if let Some(sorting) = sorting {
+                    octree.root.dfs(sorting);
+                }
+            }
             Execution::Multithreaded { num_threads } => {
-                let (tx, rx) = mpsc::channel();
+                let (tx_acc, rx_acc) = mpsc::channel();
+                let (tx_sort, rx_sort) = mpsc::channel();
 
                 let mut chunks: Vec<_> = (0..=num_threads)
                     .map(|i| i * (accelerations.len() / num_threads))
@@ -74,17 +80,25 @@ where
 
                 thread::scope(|s| {
                     for i in 0..num_threads {
-                        let tx = &tx;
+                        let tx_acc = &tx_acc;
+                        let tx_sort = &tx_sort;
                         let local_particles = local_particles[i];
+                        let sorting = sorting.as_ref();
 
                         s.spawn(move || {
                             let octree = Self::new(local_particles, theta, acceleration);
 
                             let acc: Vec<_> = particles
                                 .iter()
-                                .map(|p| octree.calculate_acceleration(p))
+                                .map(|p| octree.calculate_acceleration(p, local_particles))
                                 .collect();
-                            tx.send(acc).unwrap();
+                            tx_acc.send(acc).unwrap();
+
+                            if sorting.is_some() {
+                                let mut indices = Vec::new();
+                                octree.root.dfs(&mut indices);
+                                tx_sort.send(indices).unwrap();
+                            }
                         });
                     }
                 });
@@ -93,114 +107,128 @@ where
                     *a = Vector3::zeros();
                 }
 
-                for acc in rx.iter().take(num_threads) {
+                for acc in rx_acc.iter().take(num_threads) {
                     for (i, a) in acc.into_iter().enumerate() {
                         accelerations[i] += a;
+                    }
+                }
+
+                if let Some(sorting) = sorting {
+                    for mut sort in rx_sort.iter().take(num_threads) {
+                        sorting.append(&mut sort);
                     }
                 }
             }
             #[cfg(feature = "rayon")]
             Execution::Rayon => {
+                let octree = Self::new(particles, theta, acceleration);
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(&particles[i]);
+                    *a = octree.calculate_acceleration(&particles[i], particles);
                 });
+                if let Some(sorting) = sorting {
+                    octree.root.dfs(sorting);
+                }
             }
         }
     }
 }
 
 #[derive(Clone)]
-pub(super) struct ScalarNode<'a, F, P>
+pub(super) struct ScalarNode<F, P>
 where
     F: Float,
     P: Particle<F>,
 {
     pub(super) subnodes: Option<Box<Subnodes<Self>>>,
-    pub(super) charge: OptionalCharge<'a, F, P>,
+    pub(super) charge: OptionalCharge<F, P>,
     center: Vector3<F>,
     width: F,
 }
 
-impl<'a, F, P> ScalarNode<'a, F, P>
+impl<F, P> ScalarNode<F, P>
 where
     F: Float,
     P: Particle<F>,
 {
-    fn insert_particle_subdivide(&mut self, previous_particle: &'a P, new_particle: &'a P) {
+    fn insert_particle_subdivide(&mut self, previous_idx: u32, new_idx: u32, particles: &[P]) {
         let mut new_nodes: Subnodes<Self> = Default::default();
 
         // Create subnode for previous particle
-        let previous_index = Self::choose_subnode(&self.center, previous_particle.position());
+        let previous_node_idx =
+            Self::choose_subnode(&self.center, particles[previous_idx as usize].position());
         let previous_node = ScalarNode::new(
-            Self::center_from_subnode(self.width, self.center, previous_index),
+            Self::center_from_subnode(self.width, self.center, previous_node_idx),
             self.width / F::from_f64(2.).unwrap(),
-            previous_particle,
+            previous_idx,
         );
 
-        let new_index = Self::choose_subnode(&self.center, new_particle.position());
+        let new_node_idx =
+            Self::choose_subnode(&self.center, particles[new_idx as usize].position());
         // If previous and new particle belong in separate nodes, particles can be trivially inserted
         // (self.insert_particle would crash because one node wouldn't have a mass yet)
         // Otherwise, call insert on self below so self can be subdivided again
-        if new_index != previous_index {
+        if new_node_idx != previous_node_idx {
             let new_node = ScalarNode::new(
-                Self::center_from_subnode(self.width, self.center, new_index),
+                Self::center_from_subnode(self.width, self.center, new_node_idx),
                 self.width / F::from_f64(2.).unwrap(),
-                new_particle,
+                new_idx,
             );
             // Insert new particle
-            new_nodes[new_index] = Some(new_node);
+            new_nodes[new_node_idx] = Some(new_node);
         }
-        new_nodes[previous_index] = Some(previous_node);
+        new_nodes[previous_node_idx] = Some(previous_node);
 
         self.subnodes = Some(Box::new(new_nodes));
 
         // If particles belong in the same cell, call insert on self so self can be subdivided again
-        if previous_index == new_index {
-            self.insert_particle(new_particle);
+        if previous_node_idx == new_node_idx {
+            self.insert_particle(new_idx, particles);
         }
-        self.calculate_charge();
+
+        self.calculate_charge(particles);
     }
 }
 
-impl<'a, F, P> super::Node<'a, F, P> for ScalarNode<'a, F, P>
+impl<F, P> super::Node<F, P> for ScalarNode<F, P>
 where
     F: Float,
     P: Particle<F>,
 {
-    fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self {
+    fn new(center: Vector3<F>, width: F, particle_idx: u32) -> Self {
         Self {
             subnodes: None,
-            charge: OptionalCharge::Particle(particle),
+            charge: OptionalCharge::Particle(particle_idx),
             center,
             width,
         }
     }
 
-    fn insert_particle(&mut self, particle: &'a P) {
+    fn insert_particle(&mut self, idx: u32, particles: &[P]) {
         match &mut self.subnodes {
             // Self is inner node, insert recursively
             Some(subnodes) => {
-                let new_subnode = Self::choose_subnode(&self.center, particle.position());
+                let new_subnode =
+                    Self::choose_subnode(&self.center, particles[idx as usize].position());
 
                 match &mut subnodes[new_subnode] {
-                    Some(subnode) => subnode.insert_particle(particle),
+                    Some(subnode) => subnode.insert_particle(idx, particles),
                     None => {
                         subnodes[new_subnode] = Some(ScalarNode::new(
                             Self::center_from_subnode(self.width, self.center, new_subnode),
                             self.width / F::from_f64(2.).unwrap(),
-                            particle,
+                            idx,
                         ))
                     }
                 }
 
-                self.calculate_charge();
+                self.calculate_charge(particles);
             }
 
             // Self is outer node
             None => match self.charge {
                 // Self contains a particle, subdivide
                 OptionalCharge::Particle(previous_particle) => {
-                    self.insert_particle_subdivide(previous_particle, particle);
+                    self.insert_particle_subdivide(previous_particle, idx, particles);
                 }
 
                 OptionalCharge::Point(_) => {
@@ -210,7 +238,7 @@ where
         }
     }
 
-    fn calculate_charge(&mut self) {
+    fn calculate_charge(&mut self, particles: &[P]) {
         if let Some(subnodes) = &mut self.subnodes {
             let (mass, charge, center_of_charge) = subnodes
                 .iter_mut()
@@ -219,7 +247,10 @@ where
                     OptionalCharge::Point(charge) => {
                         (&charge.mass, &charge.charge, &charge.position)
                     }
-                    OptionalCharge::Particle(par) => (par.mass(), par.charge(), par.position()),
+                    OptionalCharge::Particle(par) => {
+                        let par = &particles[*par as usize];
+                        (par.mass(), par.charge(), par.position())
+                    }
                 })
                 .fold(
                     (F::zero(), P::Charge::zero(), Vector3::zeros()),
@@ -235,6 +266,7 @@ where
     fn calculate_acceleration(
         &self,
         particle: &P,
+        particles: &[P],
         acceleration: &P::Acceleration,
         theta: F,
     ) -> Vector3<F> {
@@ -259,12 +291,19 @@ where
                         .expect("node has neither particle nor subnodes")
                     {
                         if let Some(node) = &node {
-                            acc += node.calculate_acceleration(particle, acceleration, theta);
+                            acc += node.calculate_acceleration(
+                                particle,
+                                particles,
+                                acceleration,
+                                theta,
+                            );
                         }
                     }
                 }
             }
             OptionalCharge::Particle(particle2) => {
+                let particle2 = &particles[*particle2 as usize];
+
                 if particle.position() == particle2.position() {
                     return acc;
                 }
@@ -274,6 +313,22 @@ where
         }
 
         acc
+    }
+
+    fn dfs(&self, indices: &mut Vec<u32>) {
+        match &self.subnodes {
+            Some(subnodes) => {
+                for node in subnodes.iter().flatten() {
+                    node.dfs(indices);
+                }
+            }
+            None => match self.charge {
+                OptionalCharge::Particle(particle) => indices.push(particle),
+                OptionalCharge::Point(_) => {
+                    unreachable_debug!("node without subnodes, but point charge")
+                }
+            },
+        }
     }
 }
 
@@ -302,6 +357,7 @@ mod tests {
             0.,
             &acc,
             Execution::SingleThreaded,
+            None,
         );
 
         assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
@@ -344,6 +400,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rayon")]
     fn rayon() {
         let acc = GravitationalAcceleration::new(1e-5);
         let particles = generate_random_particles(50);
