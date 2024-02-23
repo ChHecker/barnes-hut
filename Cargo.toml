@@ -7,7 +7,6 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["randomization", "rayon", "simd", "visualization"]
 randomization = ["rand", "rand_distr"]
 simd = ["simba"]
 visualization = ["anyhow", "blue_engine"]
@@ -25,6 +24,12 @@ simba = { version = "0.8.1", optional = true }
 approx = "0.5.1"
 criterion = "0.5.1"
 nalgebra = { version = "0.32.3", features = ["rand"] }
+barnes_hut = { path = ".", features = [
+    "randomization",
+    "rayon",
+    "simd",
+    "visualization",
+] }
 
 [profile.dev]
 opt-level = 3
