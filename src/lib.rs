@@ -146,11 +146,10 @@ impl Step {
 ///     }).collect();
 /// let acceleration = GravitationalAcceleration::new(1e-4);
 ///
-/// let mut bh = Simulation::new(particles, acceleration).simd().multithreaded(4);
+/// let mut bh = Simulation::new(particles, acceleration, 1.5).simd().multithreaded(4);
 /// bh.simulate(
 ///     0.1,
-///     100,
-///     1.5
+///     100
 /// );
 /// ```
 #[derive(Debug)]
