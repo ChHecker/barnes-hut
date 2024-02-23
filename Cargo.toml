@@ -42,4 +42,5 @@ required-features = ["randomization", "visualization"]
 
 [[bench]]
 name = "benchmark"
+required-features = ["randomization", "rayon", "simd"]
 harness = false
