@@ -84,11 +84,11 @@ where
                     }
                 });
 
-                for a in accelerations.iter_mut() {
-                    *a = Vector3::zeros();
+                for (a1, a2) in accelerations.iter_mut().zip(rx.iter().next().unwrap()) {
+                    *a1 = a2;
                 }
 
-                for acc in rx.iter().take(num_threads) {
+                for acc in rx.iter().take(num_threads - 1) {
                     for (i, a) in acc.into_iter().enumerate() {
                         accelerations[i] += a;
                     }
