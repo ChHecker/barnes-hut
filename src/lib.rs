@@ -35,9 +35,9 @@ pub use interaction::SimdParticle as Particle;
 use simd::ToSimd;
 
 #[cfg(feature = "simd")]
-pub trait Float: RealField + ToSimd + Copy {}
+pub trait Float: RealField + ToSimd<4> + Copy {}
 #[cfg(feature = "simd")]
-impl<F: RealField + ToSimd + Copy> Float for F {}
+impl<F: RealField + ToSimd<4> + Copy> Float for F {}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Execution {

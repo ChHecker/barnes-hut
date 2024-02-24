@@ -396,7 +396,7 @@ where
             }
             OptionalCharge::Particle(particle2) => {
                 let pars = particle2.point_charge_simd();
-                let same: <<F as ToSimd>::Simd as SimdValue>::SimdBool = pars
+                let same: <<F as ToSimd<4>>::Simd as SimdValue>::SimdBool = pars
                     .position
                     .iter()
                     .zip(particle.position().iter())

@@ -1,21 +1,16 @@
-use nalgebra::{SimdPartialOrd, SimdRealField};
+use nalgebra::SimdRealField;
 use simba::simd::{WideF32x4, WideF64x4};
 
-pub trait Simdx4: SimdRealField + SimdPartialOrd {}
-
-impl Simdx4 for WideF32x4 {}
-impl Simdx4 for WideF64x4 {}
-
-pub trait ToSimd
+pub trait ToSimd<const W: usize>
 where
     Self: Sized,
 {
-    type Simd: Simdx4<Element = Self> + From<[Self; 4]>;
+    type Simd: SimdRealField<Element = Self> + From<[Self; W]>;
 
-    fn to_simd(arr: [Self; 4]) -> Self::Simd;
+    fn to_simd(arr: [Self; W]) -> Self::Simd;
 }
 
-impl ToSimd for f32 {
+impl ToSimd<4> for f32 {
     type Simd = WideF32x4;
 
     fn to_simd(arr: [Self; 4]) -> Self::Simd {
@@ -23,7 +18,7 @@ impl ToSimd for f32 {
     }
 }
 
-impl ToSimd for f64 {
+impl ToSimd<4> for f64 {
     type Simd = WideF64x4;
 
     fn to_simd(arr: [Self; 4]) -> Self::Simd {
