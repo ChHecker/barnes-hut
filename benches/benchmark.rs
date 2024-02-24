@@ -203,5 +203,66 @@ fn optimization(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, particles, theta, sorting, optimization);
+fn precision(c: &mut Criterion) {
+    let mut rng = StdRng::seed_from_u64(0);
+    let n_particles = 10_000;
+
+    let acc = GravitationalAcceleration::new(1e-5);
+    let particles = (0..n_particles)
+        .map(|_| {
+            GravitationalParticle::new(
+                rng.gen_range(0.0..1000.0),
+                10. * Vector3::new_random(),
+                Vector3::new_random(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut group = c.benchmark_group("barnes hut precision");
+
+    group.bench_function("double", |b| {
+        b.iter_batched_ref(
+            || Simulation::new(particles.clone(), acc.clone(), 1.5),
+            |bh| bh.simulate(0.1, 1),
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("double simd", |b| {
+        b.iter_batched_ref(
+            || Simulation::new(particles.clone(), acc.clone(), 1.5).simd(),
+            |bh| bh.simulate(0.1, 1),
+            BatchSize::SmallInput,
+        )
+    });
+
+    let acc = GravitationalAcceleration::new(1e-5f32);
+    let particles = (0..n_particles)
+        .map(|_| {
+            GravitationalParticle::new(
+                rng.gen_range(0.0..1000.0),
+                10f32 * Vector3::new_random(),
+                Vector3::new_random(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    group.bench_function("single", |b| {
+        b.iter_batched_ref(
+            || Simulation::new(particles.clone(), acc.clone(), 1.5),
+            |bh| bh.simulate(0.1, 1),
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("single simd", |b| {
+        b.iter_batched_ref(
+            || Simulation::new(particles.clone(), acc.clone(), 1.5).simd(),
+            |bh| bh.simulate(0.1, 1),
+            BatchSize::SmallInput,
+        )
+    });
+}
+
+criterion_group!(benches, particles, theta, sorting, optimization, precision);
 criterion_main!(benches);
