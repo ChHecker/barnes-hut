@@ -31,7 +31,7 @@ where
         simulator: Simulation<F, P, Vec<P>>,
         width: u32,
         height: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> color_eyre::Result<Self> {
         let mut engine = Engine::new_config(WindowDescriptor {
             width,
             height,
@@ -57,7 +57,7 @@ where
         theta: F,
         width: u32,
         height: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> color_eyre::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
         let barnes_hut = Simulation::new(particles, acceleration, theta);
 
@@ -84,7 +84,7 @@ where
     /// # Arguments
     /// - `speed`: How much faster the simulation should run than real time.
     /// - `theta`: Barnes-Hut parameter to pass to [`BarnesHut::simulate()`].
-    pub fn visualize(mut self, speed: F) -> anyhow::Result<()> {
+    pub fn visualize(mut self, speed: F) -> color_eyre::Result<()> {
         let n = self.simulator.particles().len();
 
         let mut acceleration = vec![Vector3::zeros(); n];

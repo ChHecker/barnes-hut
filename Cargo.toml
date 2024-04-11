@@ -9,21 +9,21 @@ edition = "2021"
 [features]
 randomization = ["rand", "rand_distr"]
 simd = ["simba"]
-visualization = ["anyhow", "blue_engine"]
+visualization = ["color-eyre", "blue_engine"]
 
 [dependencies]
-anyhow = { version = "1.0.80", optional = true }
-blue_engine = { version = "0.5.8", optional = true }
-nalgebra = "0.32.4"
+blue_engine = { version = "0.5.9", optional = true }
+color-eyre = { version = "0.6.3", optional = true }
+nalgebra = "0.32.5"
 rand = { version = "0.8.5", optional = true }
 rand_distr = { version = "0.4.3", optional = true }
-rayon = { version = "1.8.1", optional = true }
+rayon = { version = "1.10.0", optional = true }
 simba = { version = "0.8.1", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
 criterion = "0.5.1"
-nalgebra = { version = "0.32.4", features = ["rand"] }
+nalgebra = { version = "0.32.5", features = ["rand"] }
 barnes_hut = { path = ".", features = [
     "randomization",
     "rayon",
