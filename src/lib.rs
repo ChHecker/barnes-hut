@@ -46,7 +46,9 @@ pub enum Execution {
         num_threads: usize,
     },
     #[cfg(feature = "rayon")]
-    Rayon,
+    RayonIter,
+    #[cfg(feature = "rayon")]
+    RayonPool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -210,8 +212,18 @@ where
     ///
     /// All threads calculate the forces from the shared tree, splitting the particles.
     #[cfg(feature = "rayon")]
-    pub fn rayon(mut self) -> Self {
-        self.execution = Execution::Rayon;
+    pub fn rayon_iter(mut self) -> Self {
+        self.execution = Execution::RayonIter;
+        self
+    }
+
+    /// Use Rayon to calculate the forces with multiple threads.
+    ///
+    /// Every thread gets its own tree with a part of the particles
+    /// and calculates for all particles the forces from its own tree.
+    #[cfg(feature = "rayon")]
+    pub fn rayon_pool(mut self) -> Self {
+        self.execution = Execution::RayonPool;
         self
     }
 

@@ -70,7 +70,7 @@ where
     }
 
     pub fn rayon(mut self) -> Self {
-        self.simulator = self.simulator.rayon();
+        self.simulator = self.simulator.rayon_iter();
         self
     }
 

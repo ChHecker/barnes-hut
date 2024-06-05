@@ -100,10 +100,37 @@ where
                 }
             }
             #[cfg(feature = "rayon")]
-            Execution::Rayon => {
+            Execution::RayonIter => {
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
                     *a = octree.calculate_acceleration(&particles[i]);
                 });
+            }
+            #[cfg(feature = "rayon")]
+            Execution::RayonPool => {
+                let num_threads = rayon::current_num_threads();
+                let mut chunks: Vec<_> = (0..=num_threads)
+                    .map(|i| i * (accelerations.len() / num_threads))
+                    .collect();
+                chunks[num_threads] += particles.len() % num_threads;
+
+                let local_particles: Vec<_> = (0..num_threads)
+                    .map(|i| &particles[chunks[i]..chunks[i + 1]])
+                    .collect();
+
+                let new_acc = rayon::broadcast(|ctx| {
+                    let octree = Self::new(local_particles[ctx.index()], theta, acceleration);
+
+                    particles
+                        .iter()
+                        .map(|p| octree.calculate_acceleration(p))
+                        .collect::<Vec<_>>()
+                });
+
+                for acc in new_acc {
+                    for (i, a) in acc.into_iter().enumerate() {
+                        accelerations[i] += a;
+                    }
+                }
             }
         }
     }
@@ -349,7 +376,7 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let mut bh_single = Simulation::new(particles.clone(), acc.clone(), 0.);
-        let mut bh_rayon = Simulation::new(particles, acc, 0.).rayon();
+        let mut bh_rayon = Simulation::new(particles, acc, 0.).rayon_iter();
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(1., &mut acc_single, Step::Middle);

@@ -31,15 +31,13 @@ pub fn calculate_accelerations<F, P>(
         Execution::Multithreaded { num_threads } => {
             let (tx, rx) = mpsc::channel();
 
+            let mut chunks: Vec<_> = (0..=num_threads)
+                .map(|i| i * (accelerations.len() / num_threads))
+                .collect();
+            chunks[num_threads] += particles.len() % num_threads;
+
             let local_particles: Vec<_> = (0..num_threads)
-                .map(|i| {
-                    let mut chunks = accelerations.len() / num_threads;
-                    if i == num_threads - 1 {
-                        chunks += particles.len() % num_threads;
-                    }
-                    chunks
-                })
-                .map(|i| &particles[0..i])
+                .map(|i| &particles[chunks[i]..chunks[i + 1]])
                 .collect();
 
             thread::scope(|s| {
@@ -78,7 +76,7 @@ pub fn calculate_accelerations<F, P>(
             }
         }
         #[cfg(feature = "rayon")]
-        Execution::Rayon => {
+        Execution::RayonIter => {
             accelerations
                 .par_iter_mut()
                 .enumerate()
@@ -91,6 +89,41 @@ pub fn calculate_accelerations<F, P>(
                         *acc += acceleration.eval(particles[i].point_charge(), p2.point_charge());
                     }
                 });
+        }
+        #[cfg(feature = "rayon")]
+        Execution::RayonPool => {
+            let num_threads = rayon::current_num_threads();
+
+            let mut chunks: Vec<_> = (0..=num_threads)
+                .map(|i| i * (accelerations.len() / num_threads))
+                .collect();
+            chunks[num_threads] += particles.len() % num_threads;
+
+            let local_particles: Vec<_> = (0..num_threads)
+                .map(|i| &particles[chunks[i]..chunks[i + 1]])
+                .collect();
+
+            let new_acc = rayon::broadcast(|ctx| {
+                particles
+                    .iter()
+                    .map(|p1| {
+                        let mut acc = Vector3::zeros();
+                        for p2 in local_particles[ctx.index()] {
+                            if p1.position() == p2.position() {
+                                continue;
+                            }
+                            acc += acceleration.eval(p1.point_charge(), p2.point_charge());
+                        }
+                        acc
+                    })
+                    .collect::<Vec<_>>()
+            });
+
+            for acc in new_acc {
+                for (i, a) in acc.into_iter().enumerate() {
+                    accelerations[i] += a;
+                }
+            }
         }
     }
 }

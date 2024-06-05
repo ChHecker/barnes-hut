@@ -76,7 +76,7 @@ fn particles(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("simd rayon", n_par),
+            BenchmarkId::new("simd rayon iter", n_par),
             &n_par,
             |b, &n_par| {
                 b.iter_batched_ref(
@@ -91,7 +91,31 @@ fn particles(c: &mut Criterion) {
                                 )
                             })
                             .collect::<Vec<_>>();
-                        Simulation::new(par, acc, 1.5).simd().rayon()
+                        Simulation::new(par, acc, 1.5).simd().rayon_iter()
+                    },
+                    |bh| bh.simulate(0.1, 10),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("simd rayon pool", n_par),
+            &n_par,
+            |b, &n_par| {
+                b.iter_batched_ref(
+                    || {
+                        let acc = GravitationalAcceleration::new(1e-5);
+                        let par = (0..n_par)
+                            .map(|_| {
+                                GravitationalParticle::new(
+                                    rng.gen_range(0.0..1000.0),
+                                    10. * Vector3::new_random(),
+                                    Vector3::new_random(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        Simulation::new(par, acc, 1.5).simd().rayon_pool()
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -195,7 +219,7 @@ fn optimization(c: &mut Criterion) {
                 Simulation::new(particles.clone(), acc.clone(), 1.5)
                     .simd()
                     .sorting(1)
-                    .multithreaded(4)
+                    .rayon_pool()
             },
             |bh| bh.simulate(0.1, 1),
             BatchSize::SmallInput,
