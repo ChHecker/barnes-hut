@@ -4,27 +4,28 @@ use nalgebra::Vector3;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::{interaction::Acceleration, Execution, Float, Particle};
+use crate::{gravity, Execution, Particles};
 
-pub fn calculate_accelerations<F, P>(
-    accelerations: &mut [Vector3<F>],
-    particles: &[P],
-    acceleration: &P::Acceleration,
+pub fn calculate_accelerations(
+    particles: &Particles,
+    accelerations: &mut [Vector3<f32>],
+    epsilon: f32,
     execution: Execution,
-) where
-    F: Float,
-    P: Particle<F> + Send + Sync,
-    P::Acceleration: Send + Sync,
-{
+) {
     match execution {
         Execution::SingleThreaded => {
-            for ((i, p1), acc) in particles.iter().enumerate().zip(accelerations.iter_mut()) {
-                *acc = Vector3::zeros();
-                for (j, p2) in particles.iter().enumerate() {
+            for ((i, p1), a) in particles.positions.iter().enumerate().zip(accelerations) {
+                *a = Vector3::zeros();
+                for ((j, m2), p2) in particles
+                    .masses
+                    .iter()
+                    .enumerate()
+                    .zip(&particles.positions)
+                {
                     if i == j {
                         continue;
                     }
-                    *acc += acceleration.eval(p1.point_charge(), p2.point_charge());
+                    *a += gravity::acceleration(*p1, *m2, *p2, epsilon);
                 }
             }
         }
@@ -36,26 +37,24 @@ pub fn calculate_accelerations<F, P>(
                 .collect();
             chunks[num_threads] += particles.len() % num_threads;
 
-            let local_particles: Vec<_> = (0..num_threads)
-                .map(|i| &particles[chunks[i]..chunks[i + 1]])
-                .collect();
-
             thread::scope(|s| {
                 for i in 0..num_threads {
                     let tx = &tx;
-                    let local_particles = local_particles[i];
+                    let local_masses = &particles.masses[chunks[i]..chunks[i + 1]];
+                    let local_positions = &particles.positions[chunks[i]..chunks[i + 1]];
                     let particles = &particles;
 
                     s.spawn(move || {
                         let acc: Vec<_> = particles
+                            .positions
                             .iter()
-                            .map(|p1| {
+                            .map(|&p1| {
                                 let mut acc = Vector3::zeros();
-                                for p2 in local_particles {
-                                    if p1.position() == p2.position() {
+                                for (&m2, &p2) in local_masses.iter().zip(local_positions) {
+                                    if p1 == p2 {
                                         continue;
                                     }
-                                    acc += acceleration.eval(p1.point_charge(), p2.point_charge());
+                                    acc += gravity::acceleration(p1, m2, p2, epsilon);
                                 }
                                 acc
                             })
@@ -82,11 +81,16 @@ pub fn calculate_accelerations<F, P>(
                 .enumerate()
                 .for_each(|(i, acc)| {
                     *acc = Vector3::zeros();
-                    for (j, p2) in particles.iter().enumerate() {
+                    for (j, (&m2, &p2)) in particles
+                        .masses
+                        .iter()
+                        .zip(&particles.positions)
+                        .enumerate()
+                    {
                         if i == j {
                             continue;
                         }
-                        *acc += acceleration.eval(particles[i].point_charge(), p2.point_charge());
+                        *acc += gravity::acceleration(particles.positions[i], m2, p2, epsilon);
                     }
                 });
         }
@@ -99,20 +103,21 @@ pub fn calculate_accelerations<F, P>(
                 .collect();
             chunks[num_threads] += particles.len() % num_threads;
 
-            let local_particles: Vec<_> = (0..num_threads)
-                .map(|i| &particles[chunks[i]..chunks[i + 1]])
-                .collect();
-
             let new_acc = rayon::broadcast(|ctx| {
                 particles
+                    .positions
                     .iter()
-                    .map(|p1| {
+                    .map(|&p1| {
                         let mut acc = Vector3::zeros();
-                        for p2 in local_particles[ctx.index()] {
-                            if p1.position() == p2.position() {
+
+                        let local_range = chunks[ctx.index()]..chunks[ctx.index() + 1];
+                        let local_masses = &particles.masses[local_range.clone()];
+                        let local_positions = &particles.positions[local_range];
+                        for (&m2, &p2) in local_masses.iter().zip(local_positions) {
+                            if p1 == p2 {
                                 continue;
                             }
-                            acc += acceleration.eval(p1.point_charge(), p2.point_charge());
+                            acc += gravity::acceleration(p1, m2, p2, epsilon);
                         }
                         acc
                     })
@@ -132,25 +137,70 @@ pub fn calculate_accelerations<F, P>(
 mod tests {
     use approx::assert_abs_diff_eq;
 
-    use crate::interaction::gravity::{GravitationalAcceleration, GravitationalParticle};
-
     use super::*;
+    use crate::*;
 
     #[test]
     fn symmetry() {
-        let particle1 = GravitationalParticle::new(1e6, Vector3::new(1., 0., 0.), Vector3::zeros());
-        let particle2 =
-            GravitationalParticle::new(1e6, Vector3::new(-1., 0., 0.), Vector3::zeros());
-        let acc = GravitationalAcceleration::new(0.);
-
+        let masses = vec![1e6; 2];
+        let positions = vec![Vector3::new(1., 0., 0.), Vector3::new(-1., 0., 0.)];
+        let velocities = vec![Vector3::zeros(); 2];
+        let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
-        calculate_accelerations(
-            &mut accs,
-            &[particle1, particle2],
-            &acc,
-            Execution::SingleThreaded,
-        );
+
+        calculate_accelerations(&particles, &mut accs, 0., Execution::SingleThreaded);
 
         assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
+    }
+
+    #[test]
+    fn multithreaded() {
+        let particles = generate_random_particles(50);
+
+        let mut bh_single = Simulation::brute_force(particles.clone(), 0.);
+        let mut bh_multi = Simulation::brute_force(particles, 0.).multithreaded(2);
+
+        let mut acc_single = [Vector3::zeros(); 50];
+        bh_single.step(&mut acc_single, 1., Step::Middle);
+        let mut acc_multi = [Vector3::zeros(); 50];
+        bh_multi.step(&mut acc_multi, 1., Step::Middle);
+
+        for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+        }
+    }
+
+    #[test]
+    fn rayon_iter() {
+        let particles = generate_random_particles(50);
+
+        let mut bh_single = Simulation::brute_force(particles.clone(), 0.);
+        let mut bh_multi = Simulation::brute_force(particles, 0.).rayon_iter();
+
+        let mut acc_single = [Vector3::zeros(); 50];
+        bh_single.step(&mut acc_single, 1., Step::Middle);
+        let mut acc_multi = [Vector3::zeros(); 50];
+        bh_multi.step(&mut acc_multi, 1., Step::Middle);
+
+        for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+        }
+    }
+
+    #[test]
+    fn rayon_pool() {
+        let particles = generate_random_particles(50);
+
+        let mut bh_single = Simulation::brute_force(particles.clone(), 0.);
+        let mut bh_multi = Simulation::brute_force(particles, 0.).rayon_pool();
+
+        let mut acc_single = [Vector3::zeros(); 50];
+        bh_single.step(&mut acc_single, 1., Step::Middle);
+        let mut acc_multi = [Vector3::zeros(); 50];
+        bh_multi.step(&mut acc_multi, 1., Step::Middle);
+
+        for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+        }
     }
 }

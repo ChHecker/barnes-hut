@@ -1,9 +1,4 @@
-use nalgebra::{SimdRealField, Vector3};
-
-use crate::{
-    interaction::{Acceleration, Charge, Particle},
-    Float,
-};
+use nalgebra::Vector3;
 
 #[cfg(debug_assertions)]
 macro_rules! unreachable_debug {
@@ -27,49 +22,35 @@ mod simd;
 #[cfg(feature = "simd")]
 pub use simd::*;
 
-pub mod sorting;
+use crate::Particles;
 
 #[derive(Clone, Debug)]
-pub struct PointCharge<S, C>
-where
-    S: SimdRealField,
-{
-    pub mass: S,
-    pub charge: C,
-    pub position: Vector3<S>,
+pub struct PointMass {
+    pub mass: f32,
+    pub position: Vector3<f32>,
 }
 
-impl<S, C> PointCharge<S, C>
-where
-    S: SimdRealField,
-{
-    pub fn new(mass: S, charge: C, position: Vector3<S>) -> Self {
-        Self {
-            mass,
-            charge,
-            position,
-        }
+impl PointMass {
+    pub fn new(mass: f32, position: Vector3<f32>) -> Self {
+        Self { mass, position }
     }
 }
 
 type Subnodes<N> = [Option<N>; 8];
 
-trait Node<'a, F, P>
+trait Node<'a>
 where
     Self: Sized,
-    F: Float,
-    P: Particle<F> + 'a,
 {
-    fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self;
+    fn new(particles: &'a Particles, center: Vector3<f32>, width: f32, index: usize) -> Self;
 
-    fn from_particles(particles: impl IntoIterator<Item = &'a P> + Clone) -> Self {
-        let (center, width) = Self::get_center_and_width(particles.clone());
+    fn from_particles(particles: &'a Particles) -> Self {
+        let (center, width) = Self::get_center_and_width(&particles.positions);
 
-        let mut iter = particles.into_iter();
-        let mut node = Self::new(center, width, iter.next().unwrap());
+        let mut node = Self::new(particles, center, width, 0);
 
-        for particle in iter {
-            node.insert_particle(particle);
+        for i in 1..particles.len() {
+            node.insert_particle(i);
         }
 
         node.calculate_charge();
@@ -77,11 +58,26 @@ where
         node
     }
 
-    fn get_center_and_width(particles: impl IntoIterator<Item = &'a P>) -> (Vector3<F>, F) {
+    fn from_indices(particles: &'a Particles, indices: &[usize]) -> Self {
+        let (center, width) = Self::get_center_and_width(&particles.positions);
+
+        let mut iter = indices.iter();
+        let mut node = Self::new(particles, center, width, *iter.next().unwrap());
+
+        for &i in iter {
+            node.insert_particle(i);
+        }
+
+        node.calculate_charge();
+
+        node
+    }
+
+    fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
         let mut v_min = Vector3::zeros();
         let mut v_max = Vector3::zeros();
-        for particle in particles {
-            for (i, elem) in particle.position().iter().enumerate() {
+        for pos in positions {
+            for (i, elem) in pos.iter().enumerate() {
                 if *elem > v_max[i] {
                     v_max[i] = *elem;
                 }
@@ -91,23 +87,18 @@ where
             }
         }
         let width = (v_max - v_min).max();
-        let center = v_min + v_max / F::from_f64(2.).unwrap();
+        let center = v_min + v_max / 2.;
 
         (center, width)
     }
 
-    fn insert_particle(&mut self, particle: &'a P);
+    fn insert_particle(&mut self, index: usize);
 
     fn calculate_charge(&mut self);
 
-    fn calculate_acceleration(
-        &self,
-        particle: &P,
-        acceleration: &P::Acceleration,
-        theta: F,
-    ) -> Vector3<F>;
+    fn calculate_acceleration(&self, particle: usize, epsilon: f32, theta: f32) -> Vector3<f32>;
 
-    fn choose_subnode(center: &Vector3<F>, position: &Vector3<F>) -> usize {
+    fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
         if position.x > center.x {
             if position.y > center.y {
                 if position.z > center.z {
@@ -132,8 +123,8 @@ where
         6
     }
 
-    fn center_from_subnode(width: F, center: Vector3<F>, i: usize) -> Vector3<F> {
-        let step_size = width / F::from_f64(2.).unwrap();
+    fn center_from_subnode(width: f32, center: Vector3<f32>, i: usize) -> Vector3<f32> {
+        let step_size = width / 2.;
         if i == 0 {
             return center + Vector3::new(step_size, step_size, step_size);
         }
@@ -158,18 +149,39 @@ where
         center + Vector3::new(step_size, -step_size, -step_size)
     }
 
-    fn divide_particles_to_threads(particles: &'a [P], num_threads: usize) -> Vec<Vec<&'a P>> {
+    fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec<Vec<usize>> {
         if num_threads > 8 {
             unimplemented!()
         }
 
-        let (center, _) = Self::get_center_and_width(particles.iter());
-        let mut local_particles: Vec<Vec<&P>> = vec![Vec::new(); num_threads];
-        for p in particles.iter() {
-            let subnode = Self::choose_subnode(&center, p.position());
+        let (center, _) = Self::get_center_and_width(&particles.positions);
+        let mut local_particles: Vec<Vec<usize>> = vec![Vec::new(); num_threads];
+        for i in 0..particles.len() {
+            let subnode = Self::choose_subnode(&center, &particles.positions[i]);
             let subnode = subnode % num_threads;
-            local_particles[subnode].push(p);
+            local_particles[subnode].push(i);
         }
         local_particles
+    }
+
+    fn depth_first_search(&self, indices: &mut Vec<usize>);
+}
+
+pub fn sort_particles(particles: &mut Particles, indices: &mut [usize]) {
+    for idx in 0..particles.len() {
+        if indices[idx] != idx {
+            let mut current_idx = idx;
+            loop {
+                let target_idx = indices[current_idx];
+                indices[current_idx] = current_idx;
+                if indices[target_idx] == target_idx {
+                    break;
+                }
+                particles.masses.swap(current_idx, target_idx);
+                particles.positions.swap(current_idx, target_idx);
+                particles.velocities.swap(current_idx, target_idx);
+                current_idx = target_idx;
+            }
+        }
     }
 }

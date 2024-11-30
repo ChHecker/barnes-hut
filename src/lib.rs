@@ -1,43 +1,75 @@
 pub mod barnes_hut;
 pub mod brute_force;
-pub mod interaction;
-pub mod particle_creator;
+pub mod gravity;
+// pub mod particle_creator;
 #[cfg(feature = "simd")]
 pub mod simd;
-#[cfg(feature = "visualization")]
-pub mod visualization;
+// #[cfg(feature = "visualization")]
+// pub mod visualization;
 
 #[cfg(test)]
 mod csv;
 
-use std::marker::PhantomData;
-
-use barnes_hut::{sorting::sort_particles, BarnesHut};
-use nalgebra::{DMatrix, RealField, Vector3};
-
-#[cfg(not(feature = "simd"))]
-pub use interaction::Particle;
-
-#[cfg(not(feature = "simd"))]
-pub trait Float: RealField + Copy {}
-#[cfg(not(feature = "simd"))]
-impl<F: RealField + Copy> Float for F {}
+use barnes_hut::{sort_particles, BarnesHut}; //sorting::sort_particles,
+use nalgebra::{DMatrix, Vector3};
 
 #[cfg(feature = "simd")]
 use barnes_hut::BarnesHutSimd;
-/*
-Re-export SimdParticle as Particle if SIMD feature is activated for convenient generic programming.
-If you need non-SIMD particles (e.g. to implement the trait), use [`interaction::Particle`] directly instead.
-*/
-#[cfg(feature = "simd")]
-pub use interaction::SimdParticle as Particle;
-#[cfg(feature = "simd")]
-use simd::ToSimd;
 
-#[cfg(feature = "simd")]
-pub trait Float: RealField + ToSimd<4> + Copy {}
-#[cfg(feature = "simd")]
-impl<F: RealField + ToSimd<4> + Copy> Float for F {}
+#[derive(Clone, Debug)]
+pub struct Particles {
+    masses: Vec<f32>,
+    positions: Vec<Vector3<f32>>,
+    velocities: Vec<Vector3<f32>>,
+}
+
+impl Particles {
+    pub fn new(
+        masses: Vec<f32>,
+        positions: Vec<Vector3<f32>>,
+        velocities: Vec<Vector3<f32>>,
+    ) -> Self {
+        let n = masses.len();
+        assert_eq!(n, positions.len());
+        assert_eq!(n, velocities.len());
+
+        Self {
+            masses,
+            positions,
+            velocities,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.masses.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.masses.is_empty()
+    }
+}
+
+impl FromIterator<(f32, Vector3<f32>, Vector3<f32>)> for Particles {
+    fn from_iter<T: IntoIterator<Item = (f32, Vector3<f32>, Vector3<f32>)>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let cap = iter.size_hint().0;
+        let mut masses = Vec::with_capacity(cap);
+        let mut positions = Vec::with_capacity(cap);
+        let mut velocities = Vec::with_capacity(cap);
+
+        for (m, p, v) in iter {
+            masses.push(m);
+            positions.push(p);
+            velocities.push(v);
+        }
+
+        Self {
+            masses,
+            positions,
+            velocities,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Execution {
@@ -58,49 +90,47 @@ pub enum Sorting {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Simulator<F: Float> {
+pub enum Simulator {
     BruteForce,
     BarnesHut {
-        theta: F,
+        theta: f32,
     },
     #[cfg(feature = "simd")]
     BarnesHutSimd {
-        theta: F,
+        theta: f32,
     },
 }
 
-impl<F: Float> Simulator<F> {
-    fn calculate_accelerations<P>(
+impl Simulator {
+    fn calculate_accelerations(
         &self,
-        accelerations: &mut [Vector3<F>],
-        particles: &[P],
-        acceleration: &P::Acceleration,
+        particles: &Particles,
+        accelerations: &mut [Vector3<f32>],
+        epsilon: f32,
         execution: Execution,
-    ) where
-        P: Particle<F> + Send + Sync,
-        P::Acceleration: Send + Sync,
-    {
+        sort: bool,
+    ) -> Option<Vec<usize>> {
         match self {
-            Simulator::BruteForce => brute_force::calculate_accelerations(
-                accelerations,
-                particles,
-                acceleration,
-                execution,
-            ),
+            Simulator::BruteForce => {
+                brute_force::calculate_accelerations(particles, accelerations, epsilon, execution);
+                None
+            }
             Simulator::BarnesHut { theta } => BarnesHut::calculate_accelerations(
-                accelerations,
                 particles,
+                accelerations,
+                epsilon,
                 *theta,
-                acceleration,
                 execution,
+                sort,
             ),
             #[cfg(feature = "simd")]
             Simulator::BarnesHutSimd { theta } => BarnesHutSimd::calculate_accelerations(
-                accelerations,
                 particles,
+                accelerations,
+                epsilon,
                 *theta,
-                acceleration,
                 execution,
+                sort,
             ),
         }
     }
@@ -138,64 +168,49 @@ impl Step {
 /// # Example
 /// ```rust
 /// # use nalgebra::Vector3;
-/// # use barnes_hut::{Simulation, interaction::gravity::{GravitationalAcceleration, GravitationalParticle}};
-/// let particles: Vec<_> = (0..1_000).map(|_| {
-///         GravitationalParticle::new(
+/// # use barnes_hut::{Simulation, Particles};
+/// let particles: Particles = (0..1_000).map(|_| {
+///         (
 ///             1e6,
-///             1000. * Vector3::new_random(),
+///             1000f32 * Vector3::new_random(),
 ///             Vector3::new_random(),
 ///         )
 ///     }).collect();
-/// let acceleration = GravitationalAcceleration::new(1e-4);
 ///
-/// let mut bh = Simulation::new(particles, acceleration, 1.5).simd().multithreaded(4);
+/// let mut bh = Simulation::new(particles, 1e-5, 1.5).simd().multithreaded(4);
 /// bh.simulate(
 ///     0.1,
 ///     100
 /// );
 /// ```
 #[derive(Clone, Debug)]
-pub struct Simulation<F, P, Q>
-where
-    F: Float,
-    P: Particle<F>,
-    Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
-{
-    particles: Q,
-    acceleration: P::Acceleration,
+pub struct Simulation {
+    particles: Particles,
     execution: Execution,
-    simulator: Simulator<F>,
+    simulator: Simulator,
     sorting: Sorting,
-    phantom: PhantomData<P>,
+    epsilon: f32,
 }
 
-impl<F, P, Q> Simulation<F, P, Q>
-where
-    F: Float,
-    P: Particle<F> + Send + Sync,
-    P::Acceleration: Send + Sync,
-    Q: AsRef<[P]> + AsMut<[P]> + Send + Sync,
-{
-    pub fn new(particles: Q, acceleration: P::Acceleration, theta: F) -> Self {
+impl Simulation {
+    pub fn new(particles: Particles, epsilon: f32, theta: f32) -> Self {
         Self {
             particles,
-            acceleration,
             execution: Execution::SingleThreaded,
             simulator: Simulator::BarnesHut { theta },
             sorting: Sorting::None,
-            phantom: PhantomData,
+            epsilon,
         }
     }
 
     /// Use brute force calculation of the force.
-    pub fn brute_force(particles: Q, acceleration: P::Acceleration) -> Self {
+    pub fn brute_force(particles: Particles, epsilon: f32) -> Self {
         Self {
             particles,
-            acceleration,
             execution: Execution::SingleThreaded,
             simulator: Simulator::BruteForce,
             sorting: Sorting::None,
-            phantom: PhantomData,
+            epsilon,
         }
     }
 
@@ -251,8 +266,13 @@ where
     }
 
     /// Get an immutable reference to the particles.
-    pub fn particles(&self) -> &[P] {
-        self.particles.as_ref()
+    pub fn masses(&self) -> &[f32] {
+        &self.particles.masses
+    }
+
+    /// Get an immutable reference to the particles.
+    pub fn velocities(&self) -> &[Vector3<f32>] {
+        &self.particles.velocities
     }
 
     /// Do a single simulation step.
@@ -262,42 +282,45 @@ where
     /// - `acceleration`: The slice to store the accelerations in. Used to avoid allocations.
     /// - `current_step`: Whether the step is the first, last, or in between.
     ///     Used to do an Euler step in the beginning and end.
-    pub fn step(&mut self, time_step: F, acceleration: &mut [Vector3<F>], current_step: Step) {
-        if let Step::Sort = current_step {
-            sort_particles(self.particles.as_mut());
-        }
+    pub fn step(&mut self, accelerations: &mut [Vector3<f32>], time_step: f32, current_step: Step) {
+        let sort = matches!(current_step, Step::Sort);
 
-        self.simulator.calculate_accelerations(
-            acceleration,
-            self.particles.as_ref(),
-            &self.acceleration,
+        let sorted_indices = self.simulator.calculate_accelerations(
+            &self.particles,
+            accelerations,
+            self.epsilon,
             self.execution,
+            sort,
         );
+
+        if let Some(mut sorted_indices) = sorted_indices {
+            sort_particles(&mut self.particles, &mut sorted_indices);
+        }
 
         /*
          * Leapfrog integration:
          * v_(i + 1/2) = v_(i - 1/2) + a_i dt
          * x_(i + 1) = x_i + v_(i + 1/2) dt
          */
-        for (par, acc) in self
+        for ((pos, vel), acc) in self
             .particles
-            .as_mut()
+            .positions
             .iter_mut()
-            .zip(acceleration.iter_mut())
+            .zip(self.particles.velocities.iter_mut())
+            .zip(accelerations.iter_mut())
         {
             // in first time step, need to get from v_0 to v_(1/2)
             if let Step::First = current_step {
-                *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
+                *vel += *acc * time_step / 2.;
             } else {
-                *par.velocity_mut() += *acc * time_step;
+                *vel += *acc * time_step;
             }
 
-            let v = *par.velocity();
-            *par.position_mut() += v * time_step;
+            *pos += *vel * time_step;
 
             // in last step, need to get from v_(n_steps - 1/2) to v_(n_steps)
             if let Step::Last = current_step {
-                *par.velocity_mut() += *acc * time_step / F::from_f64(2.).unwrap();
+                *vel += *acc * time_step / 2.;
             }
         }
     }
@@ -310,15 +333,15 @@ where
     /// # Arguments
     /// - `time_step`: Size of each time step.
     /// - `num_steps`: How many time steps to take.
-    pub fn simulate(&mut self, time_step: F, num_steps: usize) -> DMatrix<Vector3<F>> {
-        assert!(time_step > F::from_f64(0.).unwrap());
+    pub fn simulate(&mut self, time_step: f32, num_steps: usize) -> DMatrix<Vector3<f32>> {
+        assert!(time_step > 0.);
         assert!(num_steps > 0);
 
-        let n = self.particles.as_ref().len();
+        let n = self.particles.len();
 
-        let mut positions: DMatrix<Vector3<F>> = DMatrix::zeros(num_steps + 1, n);
+        let mut positions: DMatrix<Vector3<f32>> = DMatrix::zeros(num_steps + 1, n);
         for (i, pos) in positions.row_mut(0).iter_mut().enumerate() {
-            *pos = *self.particles.as_ref()[i].position();
+            *pos = self.particles.positions[i];
         }
 
         let mut acceleration = vec![Vector3::zeros(); n];
@@ -326,15 +349,15 @@ where
         for t in 0..num_steps {
             let current_step = Step::from_index(t, num_steps, self.sorting);
 
-            self.step(time_step, &mut acceleration, current_step);
+            self.step(&mut acceleration, time_step, current_step);
 
-            for (par, pos) in self
+            for (par_pos, pos) in self
                 .particles
-                .as_ref()
+                .positions
                 .iter()
                 .zip(positions.row_mut(t + 1).iter_mut())
             {
-                *pos = *par.position();
+                *pos = *par_pos;
             }
         }
 
@@ -349,16 +372,14 @@ pub(crate) use tests::generate_random_particles;
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
-    use self::interaction::gravity::GravitationalParticle;
-
     use super::*;
 
-    pub(crate) fn generate_random_particles(n: usize) -> Vec<GravitationalParticle<f64>> {
+    pub(crate) fn generate_random_particles(n: usize) -> Particles {
         let mut rng = StdRng::seed_from_u64(0);
 
         (0..n)
             .map(|_| {
-                GravitationalParticle::new(
+                (
                     rng.gen_range(0.0..1e9),
                     Vector3::new(
                         rng.gen_range(-10.0..10.0),

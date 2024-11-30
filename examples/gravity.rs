@@ -1,25 +1,21 @@
-use barnes_hut::{
-    interaction::gravity::{GravitationalAcceleration, GravitationalParticle},
-    Simulation, Sorting, Step,
-};
+use barnes_hut::{Particles, Simulation, Sorting, Step};
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 fn main() {
     let mut rng = StdRng::seed_from_u64(0);
 
-    let acceleration = GravitationalAcceleration::new(1e-5);
     let num_pars = 100_000;
     let particles = (0..num_pars)
         .map(|_| {
-            GravitationalParticle::new(
+            (
                 rng.gen_range(0.0..100.0),
-                1000. * Vector3::new_random() - Vector3::new(500., 500., 500.),
-                10. * Vector3::new_random(),
+                1000f32 * Vector3::new_random() - Vector3::new(500., 500., 500.),
+                10f32 * Vector3::new_random(),
             )
         })
-        .collect::<Vec<_>>();
-    let mut bh = Simulation::new(particles, acceleration, 1.5)
+        .collect::<Particles>();
+    let mut bh = Simulation::new(particles, 1e-5, 1.5)
         .simd()
         .sorting(100)
         .multithreaded(4);
@@ -34,6 +30,6 @@ fn main() {
             println!("{t} out of {num_steps} time steps done.");
         }
 
-        bh.step(0.1, &mut acceleration, current_step);
+        bh.step(&mut acceleration, 0.1, current_step);
     }
 }
