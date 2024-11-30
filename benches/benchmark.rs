@@ -19,7 +19,7 @@ fn particles(c: &mut Criterion) {
                         .map(|_| {
                             GravitationalParticle::new(
                                 rng.gen_range(0.0..1000.0),
-                                10. * Vector3::new_random(),
+                                10f32 * Vector3::new_random(),
                                 Vector3::new_random(),
                             )
                         })
@@ -39,7 +39,7 @@ fn particles(c: &mut Criterion) {
                         .map(|_| {
                             GravitationalParticle::new(
                                 rng.gen_range(0.0..1000.0),
-                                10. * Vector3::new_random(),
+                                10f32 * Vector3::new_random(),
                                 Vector3::new_random(),
                             )
                         })
@@ -62,7 +62,7 @@ fn particles(c: &mut Criterion) {
                             .map(|_| {
                                 GravitationalParticle::new(
                                     rng.gen_range(0.0..1000.0),
-                                    10. * Vector3::new_random(),
+                                    10f32 * Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
@@ -86,7 +86,7 @@ fn particles(c: &mut Criterion) {
                             .map(|_| {
                                 GravitationalParticle::new(
                                     rng.gen_range(0.0..1000.0),
-                                    10. * Vector3::new_random(),
+                                    10f32 * Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
@@ -110,7 +110,7 @@ fn particles(c: &mut Criterion) {
                             .map(|_| {
                                 GravitationalParticle::new(
                                     rng.gen_range(0.0..1000.0),
-                                    10. * Vector3::new_random(),
+                                    10f32 * Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
@@ -133,7 +133,7 @@ fn theta(c: &mut Criterion) {
         .map(|_| {
             GravitationalParticle::new(
                 rng.gen_range(0.0..1000.0),
-                10. * Vector3::new_random(),
+                10f32 * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -163,18 +163,18 @@ fn sorting(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0);
 
     let acc = GravitationalAcceleration::new(1e-5);
-    let particles = (0..50)
+    let particles = (0..200)
         .map(|_| {
             GravitationalParticle::new(
                 rng.gen_range(0.0..1000.0),
-                10. * Vector3::new_random(),
+                10f32 * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
         .collect::<Vec<_>>();
 
     let mut group = c.benchmark_group("barnes hut sorting");
-    for n in [0, 10, 100] {
+    for n in [1, 10, 100, 1000] {
         group.bench_with_input(BenchmarkId::new("simd", n), &n, |b, &n| {
             b.iter_batched_ref(
                 || {
@@ -197,7 +197,7 @@ fn optimization(c: &mut Criterion) {
         .map(|_| {
             GravitationalParticle::new(
                 rng.gen_range(0.0..1000.0),
-                10. * Vector3::new_random(),
+                10f32 * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -236,7 +236,7 @@ fn precision(c: &mut Criterion) {
         .map(|_| {
             GravitationalParticle::new(
                 rng.gen_range(0.0..1000.0),
-                10. * Vector3::new_random(),
+                10f64 * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
