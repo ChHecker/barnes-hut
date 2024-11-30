@@ -227,7 +227,7 @@ pub fn sort_particles<F: Float, P: Particle<F>>(particles: &mut [P]) {
         })
         .collect();
 
-    let root = ScalarNode::from_particles(&index_particles);
+    let root = ScalarNode::from_particles(index_particles.iter());
 
     let mut indices = Vec::with_capacity(index_particles.len());
     root.dfs(&mut indices);

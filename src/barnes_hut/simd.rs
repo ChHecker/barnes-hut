@@ -28,7 +28,11 @@ where
     P: SimdParticle<F> + Send + Sync,
     P::Acceleration: Send + Sync,
 {
-    pub fn new(particles: &'a [P], theta: F, acceleration: &'a P::Acceleration) -> Self {
+    pub fn new(
+        particles: impl IntoIterator<Item = &'a P> + Clone,
+        theta: F,
+        acceleration: &'a P::Acceleration,
+    ) -> Self {
         Self {
             root: SimdNode::from_particles(particles),
             theta,
@@ -57,23 +61,17 @@ where
             }
             Execution::Multithreaded { num_threads } => {
                 let (tx, rx) = mpsc::channel();
-
-                let mut chunks: Vec<_> = (0..=num_threads)
-                    .map(|i| i * (accelerations.len() / num_threads))
-                    .collect();
-                chunks[num_threads] += particles.len() % num_threads;
-
-                let local_particles: Vec<_> = (0..num_threads)
-                    .map(|i| &particles[chunks[i]..chunks[i + 1]])
-                    .collect();
+                let local_particles =
+                    ScalarNode::divide_particles_to_threads(particles, num_threads);
 
                 thread::scope(|s| {
                     for i in 0..num_threads {
                         let tx = &tx;
-                        let local_particles = local_particles[i];
+                        let local_particles = &local_particles[i];
 
                         s.spawn(move || {
-                            let octree = Self::new(local_particles, theta, acceleration);
+                            let octree =
+                                Self::new(local_particles.iter().copied(), theta, acceleration);
 
                             let acc: Vec<_> = particles
                                 .iter()
@@ -96,7 +94,7 @@ where
             }
             #[cfg(feature = "rayon")]
             Execution::RayonIter => {
-                let octree = Self::new(particles, theta, acceleration);
+                let octree = Self::new(particles.iter(), theta, acceleration);
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
                     *a = octree.calculate_acceleration(&particles[i]);
                 });
@@ -104,17 +102,15 @@ where
             #[cfg(feature = "rayon")]
             Execution::RayonPool => {
                 let num_threads = rayon::current_num_threads();
-                let mut chunks: Vec<_> = (0..=num_threads)
-                    .map(|i| i * (accelerations.len() / num_threads))
-                    .collect();
-                chunks[num_threads] += particles.len() % num_threads;
-
-                let local_particles: Vec<_> = (0..num_threads)
-                    .map(|i| &particles[chunks[i]..chunks[i + 1]])
-                    .collect();
+                let local_particles =
+                    ScalarNode::divide_particles_to_threads(particles, num_threads);
 
                 let new_acc = rayon::broadcast(|ctx| {
-                    let octree = Self::new(local_particles[ctx.index()], theta, acceleration);
+                    let octree = Self::new(
+                        local_particles[ctx.index()].iter().copied(),
+                        theta,
+                        acceleration,
+                    );
 
                     particles
                         .iter()

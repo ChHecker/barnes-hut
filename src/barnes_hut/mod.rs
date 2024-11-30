@@ -58,14 +58,29 @@ trait Node<'a, F, P>
 where
     Self: Sized,
     F: Float,
-    P: Particle<F>,
+    P: Particle<F> + 'a,
 {
     fn new(center: Vector3<F>, width: F, particle: &'a P) -> Self;
 
-    fn from_particles(particles: &'a [P]) -> Self {
+    fn from_particles(particles: impl IntoIterator<Item = &'a P> + Clone) -> Self {
+        let (center, width) = Self::get_center_and_width(particles.clone());
+
+        let mut iter = particles.into_iter();
+        let mut node = Self::new(center, width, iter.next().unwrap());
+
+        for particle in iter {
+            node.insert_particle(particle);
+        }
+
+        node.calculate_charge();
+
+        node
+    }
+
+    fn get_center_and_width(particles: impl IntoIterator<Item = &'a P>) -> (Vector3<F>, F) {
         let mut v_min = Vector3::zeros();
         let mut v_max = Vector3::zeros();
-        for particle in particles.iter() {
+        for particle in particles {
             for (i, elem) in particle.position().iter().enumerate() {
                 if *elem > v_max[i] {
                     v_max[i] = *elem;
@@ -78,15 +93,7 @@ where
         let width = (v_max - v_min).max();
         let center = v_min + v_max / F::from_f64(2.).unwrap();
 
-        let mut node = Self::new(center, width, &particles[0]);
-
-        for particle in particles.iter().skip(1) {
-            node.insert_particle(particle);
-        }
-
-        node.calculate_charge();
-
-        node
+        (center, width)
     }
 
     fn insert_particle(&mut self, particle: &'a P);
@@ -149,5 +156,20 @@ where
             return center + Vector3::new(-step_size, -step_size, -step_size);
         }
         center + Vector3::new(step_size, -step_size, -step_size)
+    }
+
+    fn divide_particles_to_threads(particles: &'a [P], num_threads: usize) -> Vec<Vec<&'a P>> {
+        if num_threads > 8 {
+            unimplemented!()
+        }
+
+        let (center, _) = Self::get_center_and_width(particles.iter());
+        let mut local_particles: Vec<Vec<&P>> = vec![Vec::new(); num_threads];
+        for p in particles.iter() {
+            let subnode = Self::choose_subnode(&center, p.position());
+            let subnode = subnode % num_threads;
+            local_particles[subnode].push(p);
+        }
+        local_particles
     }
 }
