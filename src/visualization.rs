@@ -108,7 +108,7 @@ where
                 );
 
                 let col = (0.5 * (pos.z.to_subset().unwrap() as f32 + 2.) + 0.3).clamp(0.2, 1.);
-                obj.set_uniform_color(col, col, col, 1.).unwrap();
+                obj.set_color(col, col, col, 1.);
             }
 
             time = Instant::now();
