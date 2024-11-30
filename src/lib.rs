@@ -154,7 +154,7 @@ impl Step {
 ///     100
 /// );
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Simulation<F, P, Q>
 where
     F: Float,
