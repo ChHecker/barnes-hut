@@ -153,7 +153,7 @@ fn theta(c: &mut Criterion) {
 fn sorting(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0);
 
-    let particles = (0..50)
+    let particles = (0..200)
         .map(|_| {
             (
                 rng.gen_range(0.0..1000.0),
@@ -164,7 +164,7 @@ fn sorting(c: &mut Criterion) {
         .collect::<Particles>();
 
     let mut group = c.benchmark_group("barnes hut sorting");
-    for n in [0, 10, 100] {
+    for n in [1, 10, 100, 1000] {
         group.bench_with_input(BenchmarkId::new("simd", n), &n, |b, &n| {
             b.iter_batched_ref(
                 || {
@@ -197,7 +197,7 @@ fn optimization(c: &mut Criterion) {
     group.bench_function("standard", |b| {
         b.iter_batched_ref(
             || Simulation::new(particles.clone(), 1e-5, 1.5),
-            |bh| bh.simulate(0.1, 1),
+            |bh| bh.simulate(0.1, 2),
             BatchSize::SmallInput,
         )
     });
@@ -210,7 +210,7 @@ fn optimization(c: &mut Criterion) {
                     .sorting(1)
                     .rayon_pool()
             },
-            |bh| bh.simulate(0.1, 1),
+            |bh| bh.simulate(0.1, 2),
             BatchSize::SmallInput,
         )
     });
