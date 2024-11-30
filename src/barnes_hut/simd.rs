@@ -287,7 +287,7 @@ impl<'a> SimdNode<'a> {
                     self.insert_particle(particle);
                 }
 
-                self.calculate_charge();
+                self.calculate_mass();
             }
             OptionalMass::Point(_) => {
                 unreachable_debug!("leaves without a particle shouldn't exist");
@@ -326,7 +326,7 @@ impl<'a> super::Node<'a> for SimdNode<'a> {
                     }
                 }
 
-                self.calculate_charge();
+                self.calculate_mass();
             }
 
             // Self is outer node
@@ -343,7 +343,7 @@ impl<'a> super::Node<'a> for SimdNode<'a> {
         }
     }
 
-    fn calculate_charge(&mut self) {
+    fn calculate_mass(&mut self) {
         if let Some(subnodes) = &mut self.subnodes {
             let (mass, center_of_mass) = subnodes
                 .iter_mut()

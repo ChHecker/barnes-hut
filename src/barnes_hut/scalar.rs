@@ -212,7 +212,7 @@ impl<'a> ScalarNode<'a> {
         if previous_index == new_index {
             self.insert_particle(new_particle);
         }
-        self.calculate_charge();
+        self.calculate_mass();
     }
 }
 
@@ -246,7 +246,7 @@ impl<'a> super::Node<'a> for ScalarNode<'a> {
                     }
                 }
 
-                self.calculate_charge();
+                self.calculate_mass();
             }
 
             // Self is outer node
@@ -263,7 +263,7 @@ impl<'a> super::Node<'a> for ScalarNode<'a> {
         }
     }
 
-    fn calculate_charge(&mut self) {
+    fn calculate_mass(&mut self) {
         if let Some(subnodes) = &mut self.subnodes {
             let (mass, center_of_mass) = subnodes
                 .iter_mut()

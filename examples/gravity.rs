@@ -15,10 +15,8 @@ fn main() {
             )
         })
         .collect::<Particles>();
-    let mut bh = Simulation::new(particles, 1e-5, 1.5)
-        .simd()
-        .sorting(100)
-        .multithreaded(4);
+    let mut bh = Simulation::new(particles, 1e-5, 1.5).simd().sorting(1);
+    // .multithreaded(4);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];
 

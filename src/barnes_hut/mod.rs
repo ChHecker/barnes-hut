@@ -53,7 +53,7 @@ where
             node.insert_particle(i);
         }
 
-        node.calculate_charge();
+        node.calculate_mass();
 
         node
     }
@@ -68,7 +68,7 @@ where
             node.insert_particle(i);
         }
 
-        node.calculate_charge();
+        node.calculate_mass();
 
         node
     }
@@ -94,7 +94,7 @@ where
 
     fn insert_particle(&mut self, index: usize);
 
-    fn calculate_charge(&mut self);
+    fn calculate_mass(&mut self);
 
     fn calculate_acceleration(&self, particle: usize, epsilon: f32, theta: f32) -> Vector3<f32>;
 
