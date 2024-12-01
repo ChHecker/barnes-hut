@@ -10,28 +10,244 @@ use crate::{gravity, Execution};
 
 #[derive(Clone)]
 pub struct BarnesHutSimd<'a> {
-    root: SimdNode<'a>,
+    nodes: Vec<SimdNode>,
+    particles: &'a Particles,
     theta: f32,
 }
 
 impl<'a> BarnesHutSimd<'a> {
     pub fn new(particles: &'a Particles, theta: f32) -> Self {
-        Self {
-            root: SimdNode::from_particles(particles),
+        let (center, width) = get_center_and_width(&particles.positions);
+        let mut ret = Self {
+            nodes: vec![SimdNode::new(center, width, 0)],
+            particles,
             theta,
+        };
+        for i in 1..particles.len() {
+            ret.insert_particle(0, i);
         }
+        ret
     }
 
     pub fn from_indices(particles: &'a Particles, indices: &[usize], theta: f32) -> Self {
-        Self {
-            root: SimdNode::from_indices(particles, indices),
+        let (center, width) = get_center_and_width(&particles.positions); // TODO: look at indices?
+        let mut iter = indices.iter();
+        let mut ret = Self {
+            nodes: vec![SimdNode::new(center, width, *iter.next().unwrap())],
+            particles,
             theta,
+        };
+        for &i in iter {
+            ret.insert_particle(0, i);
+        }
+        ret
+    }
+
+    fn insert_particle(&mut self, node_idx: usize, particle: usize) {
+        let width = self.nodes[node_idx].width;
+        let center = self.nodes[node_idx].center;
+        let mut to_insert = None;
+
+        match &self.nodes[node_idx].subnodes {
+            // Self is inner node, insert recursively
+            Some(subnodes) => {
+                let new_subnode_idx = choose_subnode(&center, &self.particles.positions[particle]);
+
+                match &subnodes[new_subnode_idx] {
+                    Some(subnode) => self.insert_particle(*subnode, particle),
+                    None => {
+                        let new_node = SimdNode::new(
+                            center_from_subnode(width, center, new_subnode_idx),
+                            width / 2.,
+                            particle,
+                        );
+                        to_insert = Some(new_node);
+                    }
+                }
+
+                if let Some(new_node) = to_insert {
+                    self.insert_subnode(
+                        new_node,
+                        &mut self.nodes[node_idx].subnodes.unwrap(),
+                        new_subnode_idx,
+                    );
+                }
+
+                self.calculate_mass(node_idx);
+            }
+
+            // Self is outer node
+            None => match &self.nodes[node_idx].pseudoparticle {
+                // Self contains a particle, subdivide
+                OptionalMass::Particle(_) => {
+                    self.insert_particle_subdivide(node_idx, particle);
+                }
+
+                OptionalMass::Point(_) => {
+                    unreachable_debug!("leaves without a particle shouldn't exist")
+                }
+            },
+        }
+    }
+
+    fn insert_particle_subdivide(&mut self, node_idx: usize, new_particle: usize) {
+        if let OptionalMass::Particle(previous_particles) = &mut self.nodes[node_idx].pseudoparticle
+        {
+            if previous_particles.push(new_particle) {
+                return;
+            }
+        }
+
+        match &self.nodes[node_idx].pseudoparticle.clone() {
+            // TODO: Optimize
+            OptionalMass::Particle(previous_particles) => {
+                let mut new_nodes: Subnodes<usize> = Default::default();
+
+                let center = &self.nodes[node_idx].center;
+                let width = self.nodes[node_idx].width;
+
+                let new_spatial_index =
+                    choose_subnode(center, &self.particles.positions[new_particle]);
+                let new_node = SimdNode::new(
+                    center_from_subnode(width, *center, new_spatial_index),
+                    width / 2.,
+                    new_particle,
+                );
+                // Insert new particle
+                self.insert_subnode(new_node, &mut new_nodes, new_spatial_index);
+
+                self.nodes[node_idx].subnodes = Some(new_nodes);
+
+                for &particle in previous_particles.clone().iter().flatten() {
+                    self.insert_particle(node_idx, particle);
+                }
+
+                self.calculate_mass(node_idx);
+            }
+            OptionalMass::Point(_) => {
+                unreachable_debug!("leaves without a particle shouldn't exist");
+            }
+        }
+    }
+
+    fn insert_subnode(&mut self, node: SimdNode, subnodes: &mut Subnodes<usize>, idx: usize) {
+        subnodes[idx] = Some(self.nodes.len());
+        self.nodes.push(node);
+    }
+
+    fn calculate_mass(&mut self, node_idx: usize) {
+        let node = &self.nodes[node_idx];
+        if let Some(subnodes) = &node.subnodes {
+            let (mass, center_of_mass) = subnodes
+                .iter()
+                .filter_map(|node| node.as_ref())
+                .map(
+                    |subnode_idx| match &self.nodes[*subnode_idx].pseudoparticle {
+                        OptionalMass::Point(pseudo) => (pseudo.mass, pseudo.position),
+                        OptionalMass::Particle(par) => par.center_of_mass(self.particles),
+                    },
+                )
+                .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
+                    let m_sum = m_acc + m;
+                    (m_sum, (pos_acc * m_acc + pos * m) / m_sum)
+                });
+
+            self.nodes[node_idx].pseudoparticle =
+                OptionalMass::Point(PointMass::new(mass, center_of_mass));
+        }
+    }
+
+    fn calculate_acceleration_recursive(
+        &self,
+        node_idx: usize,
+        particle: usize,
+        epsilon: f32,
+        theta: f32,
+    ) -> Vector3<f32> {
+        let node = &self.nodes[node_idx];
+        let mut acc = Vector3::zeros();
+
+        match &node.pseudoparticle {
+            OptionalMass::Point(pseudo) => {
+                if pseudo.position == self.particles.positions[particle] {
+                    return acc;
+                }
+
+                let r = self.particles.positions[particle] - pseudo.position;
+
+                if node.width / r.norm() < theta {
+                    // leaf nodes or node is far enough away
+                    acc += gravity::acceleration(
+                        self.particles.positions[particle],
+                        pseudo.mass,
+                        pseudo.position,
+                        epsilon,
+                    );
+                } else {
+                    // near field forces, go deeper into tree
+                    for subnode in node
+                        .subnodes
+                        .expect("node has neither particle nor subnodes")
+                    {
+                        if let Some(subnode) = &subnode {
+                            acc += self.calculate_acceleration_recursive(
+                                *subnode, particle, epsilon, theta,
+                            );
+                        }
+                    }
+                }
+            }
+            OptionalMass::Particle(particle2) => {
+                let masses = particle2.masses(self.particles);
+                let positions = particle2.positions(self.particles);
+                let same: WideBoolF32x8 = positions
+                    .iter()
+                    .zip(self.particles.positions[particle].iter())
+                    .map(|(p2, p1)| (*p2).simd_eq(WideF32x8::splat(*p1)))
+                    .reduce(|x, y| x & y)
+                    .unwrap();
+
+                // acc += acceleration
+                //     .eval_simd(particle.point_charge(), &pars)
+                //     .map(|elem| same.if_else(|| F::Simd::splat(F::zero()), || elem))
+                //     .map(|elem| elem.simd_horizontal_sum());
+                acc += gravity::acceleration_simd(
+                    self.particles.positions[particle],
+                    masses,
+                    positions,
+                    epsilon,
+                )
+                .map(|elem| same.if_else(|| WideF32x8::splat(0.), || elem))
+                .map(|elem| elem.simd_horizontal_sum());
+            }
+        }
+
+        acc
+    }
+
+    fn depth_first_search(&self, node_idx: usize, indices: &mut Vec<usize>) {
+        let node = &self.nodes[node_idx];
+        match &node.subnodes {
+            Some(subnodes) => {
+                for subnode in subnodes.iter().flatten() {
+                    self.depth_first_search(*subnode, indices);
+                }
+            }
+            None => match node.pseudoparticle {
+                OptionalMass::Particle(arr) => {
+                    for &particle in arr.iter().flatten() {
+                        indices.push(particle)
+                    }
+                }
+                OptionalMass::Point(_) => {
+                    unreachable_debug!("node without subnodes, but point charge")
+                }
+            },
         }
     }
 
     pub fn calculate_acceleration(&self, particle: usize, epsilon: f32) -> Vector3<f32> {
-        self.root
-            .calculate_acceleration(particle, epsilon, self.theta)
+        self.calculate_acceleration_recursive(0, particle, epsilon, self.theta)
     }
 
     pub fn calculate_accelerations(
@@ -57,8 +273,7 @@ impl<'a> BarnesHutSimd<'a> {
             Execution::Multithreaded { num_threads } => {
                 let (tx_acc, rx_acc) = mpsc::channel();
                 let (tx_sort, rx_sort) = mpsc::channel();
-                let local_particles =
-                    ScalarNode::divide_particles_to_threads(particles, num_threads);
+                let local_particles = divide_particles_to_threads(particles, num_threads);
 
                 thread::scope(|s| {
                     for i in 0..num_threads {
@@ -117,8 +332,7 @@ impl<'a> BarnesHutSimd<'a> {
             #[cfg(feature = "rayon")]
             Execution::RayonPool => {
                 let num_threads = rayon::current_num_threads();
-                let local_particles =
-                    ScalarNode::divide_particles_to_threads(particles, num_threads);
+                let local_particles = divide_particles_to_threads(particles, num_threads);
 
                 let res = rayon::broadcast(|ctx| {
                     let octree =
@@ -157,7 +371,7 @@ impl<'a> BarnesHutSimd<'a> {
 
     pub fn sorted_indices(&self) -> Vec<usize> {
         let mut indices = Vec::new();
-        self.root.depth_first_search(&mut indices);
+        self.depth_first_search(0, &mut indices);
         indices
     }
 }
@@ -250,194 +464,20 @@ impl Clone for OptionalMass {
 }
 
 #[derive(Clone)]
-struct SimdNode<'a> {
-    subnodes: Option<Box<Subnodes<Self>>>,
+struct SimdNode {
+    subnodes: Option<Subnodes<usize>>,
     pseudoparticle: OptionalMass,
     center: Vector3<f32>,
     width: f32,
-    particles: &'a Particles,
 }
 
-impl<'a> SimdNode<'a> {
-    fn insert_particle_subdivide(&mut self, new_particle: usize) {
-        if let OptionalMass::Particle(previous_particles) = &mut self.pseudoparticle {
-            if previous_particles.push(new_particle) {
-                return;
-            }
-        }
-
-        match &self.pseudoparticle {
-            OptionalMass::Particle(previous_particles) => {
-                let mut new_nodes: Subnodes<Self> = Default::default();
-
-                let new_index =
-                    Self::choose_subnode(&self.center, &self.particles.positions[new_particle]);
-                let new_node = SimdNode::new(
-                    self.particles,
-                    Self::center_from_subnode(self.width, self.center, new_index),
-                    self.width / 2.,
-                    new_particle,
-                );
-                // Insert new particle
-                new_nodes[new_index] = Some(new_node);
-
-                self.subnodes = Some(Box::new(new_nodes));
-
-                for &particle in previous_particles.clone().iter().flatten() {
-                    self.insert_particle(particle);
-                }
-
-                self.calculate_mass();
-            }
-            OptionalMass::Point(_) => {
-                unreachable_debug!("leaves without a particle shouldn't exist");
-            }
-        }
-    }
-}
-
-impl<'a> super::Node<'a> for SimdNode<'a> {
-    fn new(particles: &'a Particles, center: Vector3<f32>, width: f32, particle: usize) -> Self {
+impl SimdNode {
+    fn new(center: Vector3<f32>, width: f32, particle: usize) -> Self {
         Self {
             subnodes: None,
             pseudoparticle: OptionalMass::Particle(ParticleArray::from_particle(particle)),
             center,
             width,
-            particles,
-        }
-    }
-
-    fn insert_particle(&mut self, particle: usize) {
-        match &mut self.subnodes {
-            // Self is inner node, insert recursively
-            Some(subnodes) => {
-                let new_subnode =
-                    Self::choose_subnode(&self.center, &self.particles.positions[particle]);
-
-                match &mut subnodes[new_subnode] {
-                    Some(subnode) => subnode.insert_particle(particle),
-                    None => {
-                        subnodes[new_subnode] = Some(SimdNode::new(
-                            self.particles,
-                            Self::center_from_subnode(self.width, self.center, new_subnode),
-                            self.width / 2.,
-                            particle,
-                        ))
-                    }
-                }
-
-                self.calculate_mass();
-            }
-
-            // Self is outer node
-            None => match &self.pseudoparticle {
-                // Self contains a particle, subdivide
-                OptionalMass::Particle(_) => {
-                    self.insert_particle_subdivide(particle);
-                }
-
-                OptionalMass::Point(_) => {
-                    unreachable_debug!("leaves without a particle shouldn't exist")
-                }
-            },
-        }
-    }
-
-    fn calculate_mass(&mut self) {
-        if let Some(subnodes) = &mut self.subnodes {
-            let (mass, center_of_mass) = subnodes
-                .iter_mut()
-                .filter_map(|node| node.as_mut())
-                .map(|node| match &node.pseudoparticle {
-                    OptionalMass::Point(pseudo) => (pseudo.mass, pseudo.position),
-                    OptionalMass::Particle(par) => par.center_of_mass(self.particles),
-                })
-                .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
-                    let m_sum = m_acc + m;
-                    (m_sum, (pos_acc * m_acc + pos * m) / m_sum)
-                });
-
-            self.pseudoparticle = OptionalMass::Point(PointMass::new(mass, center_of_mass));
-        }
-    }
-
-    fn calculate_acceleration(&self, particle: usize, epsilon: f32, theta: f32) -> Vector3<f32> {
-        let mut acc = Vector3::zeros();
-
-        match &self.pseudoparticle {
-            OptionalMass::Point(pseudo) => {
-                if pseudo.position == self.particles.positions[particle] {
-                    return acc;
-                }
-
-                let r = self.particles.positions[particle] - pseudo.position;
-
-                if self.width / r.norm() < theta {
-                    // leaf nodes or node is far enough away
-                    acc += gravity::acceleration(
-                        self.particles.positions[particle],
-                        pseudo.mass,
-                        pseudo.position,
-                        epsilon,
-                    );
-                } else {
-                    // near field forces, go deeper into tree
-                    for node in self
-                        .subnodes
-                        .as_deref()
-                        .expect("node has neither particle nor subnodes")
-                    {
-                        if let Some(node) = &node {
-                            acc += node.calculate_acceleration(particle, epsilon, theta);
-                        }
-                    }
-                }
-            }
-            OptionalMass::Particle(particle2) => {
-                let masses = particle2.masses(self.particles);
-                let positions = particle2.positions(self.particles);
-                let same: WideBoolF32x8 = positions
-                    .iter()
-                    .zip(self.particles.positions[particle].iter())
-                    .map(|(p2, p1)| (*p2).simd_eq(WideF32x8::splat(*p1)))
-                    .reduce(|x, y| x & y)
-                    .unwrap();
-
-                // acc += acceleration
-                //     .eval_simd(particle.point_charge(), &pars)
-                //     .map(|elem| same.if_else(|| F::Simd::splat(F::zero()), || elem))
-                //     .map(|elem| elem.simd_horizontal_sum());
-                acc += gravity::acceleration_simd(
-                    self.particles.positions[particle],
-                    masses,
-                    positions,
-                    epsilon,
-                )
-                .map(|elem| same.if_else(|| WideF32x8::splat(0.), || elem))
-                .map(|elem| elem.simd_horizontal_sum());
-            }
-        }
-
-        acc
-    }
-
-    fn depth_first_search(&self, indices: &mut Vec<usize>) {
-        match &self.subnodes {
-            Some(subnodes) => {
-                for node in subnodes.iter().flatten() {
-                    node.depth_first_search(indices);
-                }
-            }
-            None => match self.pseudoparticle {
-                OptionalMass::Particle(arr) => {
-                    for &particle in arr.iter().flatten() {
-                        indices.push(particle)
-                    }
-                }
-                OptionalMass::Point(_) => {
-                    unreachable_debug!("node without subnodes, but point charge")
-                }
-            },
         }
     }
 }

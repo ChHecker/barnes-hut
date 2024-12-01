@@ -38,133 +38,89 @@ impl PointMass {
 
 type Subnodes<N> = [Option<N>; 8];
 
-trait Node<'a>
-where
-    Self: Sized,
-{
-    fn new(particles: &'a Particles, center: Vector3<f32>, width: f32, index: usize) -> Self;
-
-    fn from_particles(particles: &'a Particles) -> Self {
-        let (center, width) = Self::get_center_and_width(&particles.positions);
-
-        let mut node = Self::new(particles, center, width, 0);
-
-        for i in 1..particles.len() {
-            node.insert_particle(i);
-        }
-
-        node.calculate_mass();
-
-        node
-    }
-
-    fn from_indices(particles: &'a Particles, indices: &[usize]) -> Self {
-        let (center, width) = Self::get_center_and_width(&particles.positions);
-
-        let mut iter = indices.iter();
-        let mut node = Self::new(particles, center, width, *iter.next().unwrap());
-
-        for &i in iter {
-            node.insert_particle(i);
-        }
-
-        node.calculate_mass();
-
-        node
-    }
-
-    fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
-        let mut v_min = Vector3::zeros();
-        let mut v_max = Vector3::zeros();
-        for pos in positions {
-            for (i, elem) in pos.iter().enumerate() {
-                if *elem > v_max[i] {
-                    v_max[i] = *elem;
-                }
-                if *elem < v_min[i] {
-                    v_min[i] = *elem;
-                }
+fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
+    let mut v_min = Vector3::zeros();
+    let mut v_max = Vector3::zeros();
+    for pos in positions {
+        for (i, elem) in pos.iter().enumerate() {
+            if *elem > v_max[i] {
+                v_max[i] = *elem;
+            }
+            if *elem < v_min[i] {
+                v_min[i] = *elem;
             }
         }
-        let width = (v_max - v_min).max();
-        let center = v_min + v_max / 2.;
-
-        (center, width)
     }
+    let width = (v_max - v_min).max();
+    let center = v_min + v_max / 2.;
 
-    fn insert_particle(&mut self, index: usize);
+    (center, width)
+}
 
-    fn calculate_mass(&mut self);
-
-    fn calculate_acceleration(&self, particle: usize, epsilon: f32, theta: f32) -> Vector3<f32>;
-
-    fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
-        if position.x > center.x {
-            if position.y > center.y {
-                if position.z > center.z {
-                    return 0;
-                }
-                return 4;
-            }
-            if position.z > center.z {
-                return 3;
-            }
-            return 7;
-        }
+fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
+    if position.x > center.x {
         if position.y > center.y {
             if position.z > center.z {
-                return 1;
+                return 0;
             }
-            return 5;
+            return 4;
         }
         if position.z > center.z {
-            return 2;
+            return 3;
         }
-        6
+        return 7;
+    }
+    if position.y > center.y {
+        if position.z > center.z {
+            return 1;
+        }
+        return 5;
+    }
+    if position.z > center.z {
+        return 2;
+    }
+    6
+}
+
+fn center_from_subnode(width: f32, center: Vector3<f32>, i: usize) -> Vector3<f32> {
+    let step_size = width / 2.;
+    if i == 0 {
+        return center + Vector3::new(step_size, step_size, step_size);
+    }
+    if i == 1 {
+        return center + Vector3::new(-step_size, step_size, step_size);
+    }
+    if i == 2 {
+        return center + Vector3::new(-step_size, -step_size, step_size);
+    }
+    if i == 3 {
+        return center + Vector3::new(step_size, -step_size, step_size);
+    }
+    if i == 4 {
+        return center + Vector3::new(step_size, step_size, -step_size);
+    }
+    if i == 5 {
+        return center + Vector3::new(-step_size, step_size, -step_size);
+    }
+    if i == 6 {
+        return center + Vector3::new(-step_size, -step_size, -step_size);
+    }
+    center + Vector3::new(step_size, -step_size, -step_size)
+}
+
+fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec<Vec<usize>> {
+    if num_threads > 8 {
+        unimplemented!()
     }
 
-    fn center_from_subnode(width: f32, center: Vector3<f32>, i: usize) -> Vector3<f32> {
-        let step_size = width / 2.;
-        if i == 0 {
-            return center + Vector3::new(step_size, step_size, step_size);
-        }
-        if i == 1 {
-            return center + Vector3::new(-step_size, step_size, step_size);
-        }
-        if i == 2 {
-            return center + Vector3::new(-step_size, -step_size, step_size);
-        }
-        if i == 3 {
-            return center + Vector3::new(step_size, -step_size, step_size);
-        }
-        if i == 4 {
-            return center + Vector3::new(step_size, step_size, -step_size);
-        }
-        if i == 5 {
-            return center + Vector3::new(-step_size, step_size, -step_size);
-        }
-        if i == 6 {
-            return center + Vector3::new(-step_size, -step_size, -step_size);
-        }
-        center + Vector3::new(step_size, -step_size, -step_size)
+    let (center, _) = get_center_and_width(&particles.positions);
+    let mut local_particles: Vec<Vec<usize>> = vec![Vec::new(); num_threads];
+    for i in 0..particles.len() {
+        let subnode = choose_subnode(&center, &particles.positions[i]);
+        let subnode = subnode % num_threads;
+        local_particles[subnode].push(i);
     }
-
-    fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec<Vec<usize>> {
-        if num_threads > 8 {
-            unimplemented!()
-        }
-
-        let (center, _) = Self::get_center_and_width(&particles.positions);
-        let mut local_particles: Vec<Vec<usize>> = vec![Vec::new(); num_threads];
-        for i in 0..particles.len() {
-            let subnode = Self::choose_subnode(&center, &particles.positions[i]);
-            let subnode = subnode % num_threads;
-            local_particles[subnode].push(i);
-        }
-        local_particles
-    }
-
-    fn depth_first_search(&self, indices: &mut Vec<usize>);
+    local_particles
 }
 
 pub fn sort_particles(particles: &mut Particles, indices: &mut [usize]) {

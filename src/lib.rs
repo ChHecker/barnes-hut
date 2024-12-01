@@ -380,7 +380,7 @@ mod tests {
         (0..n)
             .map(|_| {
                 (
-                    rng.gen_range(0.0..1e9),
+                    rng.gen_range(0.0..1.0),
                     Vector3::new(
                         rng.gen_range(-10.0..10.0),
                         rng.gen_range(-10.0..10.0),
