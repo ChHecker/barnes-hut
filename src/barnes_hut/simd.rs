@@ -18,8 +18,10 @@ pub struct BarnesHutSimd<'a> {
 impl<'a> BarnesHutSimd<'a> {
     pub fn new(particles: &'a Particles, theta: f32) -> Self {
         let (center, width) = get_center_and_width(&particles.positions);
+        let mut nodes = Vec::with_capacity(particles.len());
+        nodes.push(SimdNode::new(center, width, 0));
         let mut ret = Self {
-            nodes: vec![SimdNode::new(center, width, 0)],
+            nodes,
             particles,
             theta,
         };
@@ -32,8 +34,10 @@ impl<'a> BarnesHutSimd<'a> {
     pub fn from_indices(particles: &'a Particles, indices: &[usize], theta: f32) -> Self {
         let (center, width) = get_center_and_width(&particles.positions); // TODO: look at indices?
         let mut iter = indices.iter();
+        let mut nodes = Vec::with_capacity(particles.len());
+        nodes.push(SimdNode::new(center, width, *iter.next().unwrap()));
         let mut ret = Self {
-            nodes: vec![SimdNode::new(center, width, *iter.next().unwrap())],
+            nodes,
             particles,
             theta,
         };
@@ -46,27 +50,22 @@ impl<'a> BarnesHutSimd<'a> {
     fn insert_particle(&mut self, node_idx: usize, particle: usize) {
         let width = self.nodes[node_idx].width;
         let center = self.nodes[node_idx].center;
-        let mut to_insert = None;
 
         match &self.nodes[node_idx].subnodes {
             // Self is inner node, insert recursively
             Some(subnodes) => {
                 let new_subnode_idx = choose_subnode(&center, &self.particles.positions[particle]);
 
-                match &subnodes[new_subnode_idx] {
-                    Some(subnode) => self.insert_particle(*subnode, particle),
+                match subnodes[new_subnode_idx] {
+                    Some(subnode) => self.insert_particle(subnode, particle),
                     None => {
                         let new_node = SimdNode::new(
                             center_from_subnode(width, center, new_subnode_idx),
                             width / 2.,
                             particle,
                         );
-                        to_insert = Some(new_node);
+                        self.insert_subnode_self(new_node, node_idx, new_subnode_idx);
                     }
-                }
-
-                if let Some(new_node) = to_insert {
-                    self.insert_subnode_self(new_node, node_idx, new_subnode_idx);
                 }
 
                 self.calculate_mass(node_idx);
