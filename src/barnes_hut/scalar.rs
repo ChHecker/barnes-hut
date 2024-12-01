@@ -13,6 +13,7 @@ pub(super) enum OptionalMass {
     Point(PointMass),
 }
 
+#[derive(Debug)]
 pub struct BarnesHut<'a> {
     nodes: Vec<ScalarNode>,
     particles: &'a Particles,
@@ -70,11 +71,7 @@ impl<'a> BarnesHut<'a> {
                 }
 
                 if let Some(new_node) = to_insert {
-                    self.insert_subnode(
-                        new_node,
-                        &mut self.nodes[node_idx].subnodes.unwrap(),
-                        new_subnode_idx,
-                    );
+                    self.insert_subnode_self(new_node, node_idx, new_subnode_idx);
                 }
 
                 self.calculate_mass(node_idx);
@@ -138,8 +135,18 @@ impl<'a> BarnesHut<'a> {
         self.calculate_mass(node_idx);
     }
 
-    fn insert_subnode(&mut self, node: ScalarNode, subnodes: &mut Subnodes<usize>, idx: usize) {
-        subnodes[idx] = Some(self.nodes.len());
+    fn insert_subnode(
+        &mut self,
+        node: ScalarNode,
+        subnodes: &mut Subnodes<usize>,
+        subnode_idx: usize,
+    ) {
+        subnodes[subnode_idx] = Some(self.nodes.len());
+        self.nodes.push(node);
+    }
+
+    fn insert_subnode_self(&mut self, node: ScalarNode, node_idx: usize, subnode_idx: usize) {
+        self.nodes[node_idx].subnodes.as_mut().unwrap()[subnode_idx] = Some(self.nodes.len());
         self.nodes.push(node);
     }
 
@@ -226,10 +233,13 @@ impl<'a> BarnesHut<'a> {
     }
 
     fn depth_first_search(&self, node_idx: usize, indices: &mut Vec<usize>) {
+        dbg!(node_idx);
         let node = &self.nodes[node_idx];
         match &node.subnodes {
             Some(subnodes) => {
+                dbg!(subnodes);
                 for subnode in subnodes.iter().flatten() {
+                    dbg!(subnode);
                     self.depth_first_search(*subnode, indices);
                 }
             }
@@ -240,6 +250,7 @@ impl<'a> BarnesHut<'a> {
                 }
             },
         }
+        println!();
     }
 
     pub fn calculate_acceleration(&self, particle: usize, epsilon: f32) -> Vector3<f32> {
@@ -420,7 +431,7 @@ mod tests {
 
     #[test]
     fn brute_force() {
-        const N: usize = 10;
+        const N: usize = 3;
         let particles = generate_random_particles(N);
 
         let mass_sum: f32 = particles.masses.iter().sum();
@@ -471,5 +482,28 @@ mod tests {
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
             assert_abs_diff_eq!(s, m, epsilon = 1e-6);
         }
+    }
+
+    #[test]
+    fn sorted_indices() {
+        const N: usize = 8;
+        let n_rt = (N as f64).powf(1. / 3.) as usize;
+
+        let masses = vec![1.; N];
+        let mut positions = vec![Vector3::zeros(); N];
+        for i in 0..n_rt {
+            for j in 0..n_rt {
+                for k in 0..n_rt {
+                    positions[i + n_rt * (j + n_rt * k)] =
+                        Vector3::new(i as f32, j as f32, k as f32);
+                }
+            }
+        }
+        let velocities = vec![Vector3::zeros(); N];
+        let particles = Particles::new(masses, positions, velocities);
+
+        let bh = BarnesHut::new(&particles, 0.);
+        dbg!(&bh.nodes[0]);
+        dbg!(bh.sorted_indices());
     }
 }

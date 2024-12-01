@@ -124,6 +124,8 @@ fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec
 }
 
 pub fn sort_particles(particles: &mut Particles, indices: &mut [usize]) {
+    dbg!(&particles.len());
+    dbg!(&indices);
     for idx in 0..particles.len() {
         if indices[idx] != idx {
             let mut current_idx = idx;

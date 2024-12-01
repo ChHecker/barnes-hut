@@ -66,11 +66,7 @@ impl<'a> BarnesHutSimd<'a> {
                 }
 
                 if let Some(new_node) = to_insert {
-                    self.insert_subnode(
-                        new_node,
-                        &mut self.nodes[node_idx].subnodes.unwrap(),
-                        new_subnode_idx,
-                    );
+                    self.insert_subnode_self(new_node, node_idx, new_subnode_idx);
                 }
 
                 self.calculate_mass(node_idx);
@@ -130,8 +126,18 @@ impl<'a> BarnesHutSimd<'a> {
         }
     }
 
-    fn insert_subnode(&mut self, node: SimdNode, subnodes: &mut Subnodes<usize>, idx: usize) {
-        subnodes[idx] = Some(self.nodes.len());
+    fn insert_subnode(
+        &mut self,
+        node: SimdNode,
+        subnodes: &mut Subnodes<usize>,
+        subnode_idx: usize,
+    ) {
+        subnodes[subnode_idx] = Some(self.nodes.len());
+        self.nodes.push(node);
+    }
+
+    fn insert_subnode_self(&mut self, node: SimdNode, node_idx: usize, subnode_idx: usize) {
+        self.nodes[node_idx].subnodes.as_mut().unwrap()[subnode_idx] = Some(self.nodes.len());
         self.nodes.push(node);
     }
 
