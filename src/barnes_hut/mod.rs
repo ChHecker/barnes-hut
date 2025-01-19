@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use nalgebra::Vector3;
 
 #[cfg(debug_assertions)]
@@ -36,7 +38,28 @@ impl PointMass {
     }
 }
 
-type Subnodes<N> = [Option<N>; 8];
+#[derive(Clone, Debug)]
+struct Subnodes([usize; 8]);
+
+impl Default for Subnodes {
+    fn default() -> Self {
+        Self([usize::MAX; 8])
+    }
+}
+
+impl Deref for Subnodes {
+    type Target = [usize; 8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Subnodes {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
     let mut v_min = Vector3::zeros();

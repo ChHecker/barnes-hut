@@ -57,8 +57,7 @@ impl<'a> BarnesHutSimd<'a> {
                 let new_subnode_idx = choose_subnode(&center, &self.particles.positions[particle]);
 
                 match subnodes[new_subnode_idx] {
-                    Some(subnode) => self.insert_particle(subnode, particle),
-                    None => {
+                    usize::MAX => {
                         let new_node = SimdNode::new(
                             center_from_subnode(width, center, new_subnode_idx),
                             width / 2.,
@@ -66,6 +65,7 @@ impl<'a> BarnesHutSimd<'a> {
                         );
                         self.insert_subnode_self(new_node, node_idx, new_subnode_idx);
                     }
+                    subnode => self.insert_particle(subnode, particle),
                 }
 
                 self.calculate_mass(node_idx);
@@ -96,7 +96,7 @@ impl<'a> BarnesHutSimd<'a> {
         match &self.nodes[node_idx].pseudoparticle.clone() {
             // TODO: Optimize
             OptionalMass::Particle(previous_particles) => {
-                let mut new_nodes: Subnodes<usize> = Default::default();
+                let mut new_nodes: Subnodes = Default::default();
 
                 let center = &self.nodes[node_idx].center;
                 let width = self.nodes[node_idx].width;
@@ -125,18 +125,13 @@ impl<'a> BarnesHutSimd<'a> {
         }
     }
 
-    fn insert_subnode(
-        &mut self,
-        node: SimdNode,
-        subnodes: &mut Subnodes<usize>,
-        subnode_idx: usize,
-    ) {
-        subnodes[subnode_idx] = Some(self.nodes.len());
+    fn insert_subnode(&mut self, node: SimdNode, subnodes: &mut Subnodes, subnode_idx: usize) {
+        subnodes[subnode_idx] = self.nodes.len();
         self.nodes.push(node);
     }
 
     fn insert_subnode_self(&mut self, node: SimdNode, node_idx: usize, subnode_idx: usize) {
-        self.nodes[node_idx].subnodes.as_mut().unwrap()[subnode_idx] = Some(self.nodes.len());
+        self.nodes[node_idx].subnodes.as_mut().unwrap()[subnode_idx] = self.nodes.len();
         self.nodes.push(node);
     }
 
@@ -145,7 +140,7 @@ impl<'a> BarnesHutSimd<'a> {
         if let Some(subnodes) = &node.subnodes {
             let (mass, center_of_mass) = subnodes
                 .iter()
-                .filter_map(|node| node.as_ref())
+                .filter(|node| **node != usize::MAX)
                 .map(
                     |subnode_idx| match &self.nodes[*subnode_idx].pseudoparticle {
                         OptionalMass::Point(pseudo) => (pseudo.mass, pseudo.position),
@@ -192,9 +187,10 @@ impl<'a> BarnesHutSimd<'a> {
                     // near field forces, go deeper into tree
                     for subnode in node
                         .subnodes
+                        .as_deref()
                         .expect("node has neither particle nor subnodes")
                     {
-                        if let Some(subnode) = &subnode {
+                        if *subnode != usize::MAX {
                             acc += self.calculate_acceleration_recursive(
                                 *subnode, particle, epsilon, theta,
                             );
@@ -234,8 +230,10 @@ impl<'a> BarnesHutSimd<'a> {
         let node = &self.nodes[node_idx];
         match &node.subnodes {
             Some(subnodes) => {
-                for subnode in subnodes.iter().flatten() {
-                    self.depth_first_search(*subnode, indices);
+                for subnode in subnodes.deref() {
+                    if *subnode != usize::MAX {
+                        self.depth_first_search(*subnode, indices);
+                    }
                 }
             }
             None => match node.pseudoparticle {
@@ -470,7 +468,7 @@ impl Clone for OptionalMass {
 
 #[derive(Clone)]
 struct SimdNode {
-    subnodes: Option<Subnodes<usize>>,
+    subnodes: Option<Subnodes>,
     pseudoparticle: OptionalMass,
     center: Vector3<f32>,
     width: f32,
