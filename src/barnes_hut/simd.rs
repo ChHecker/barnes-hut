@@ -258,7 +258,7 @@ struct SimdNode<'a> {
     particles: &'a Particles,
 }
 
-impl<'a> SimdNode<'a> {
+impl SimdNode<'_> {
     fn insert_particle_subdivide(&mut self, new_particle: usize) {
         if let OptionalMass::Particle(previous_particles) = &mut self.pseudoparticle {
             if previous_particles.push(new_particle) {

@@ -176,7 +176,7 @@ pub(super) struct ScalarNode<'a> {
     particles: &'a Particles,
 }
 
-impl<'a> ScalarNode<'a> {
+impl ScalarNode<'_> {
     fn insert_particle_subdivide(&mut self, previous_particle: usize, new_particle: usize) {
         let mut new_nodes: Subnodes<Self> = Default::default();
 
