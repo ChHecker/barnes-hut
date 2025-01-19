@@ -113,7 +113,7 @@ impl<'a> BarnesHutSimd<'a> {
 
                 self.nodes[node_idx].subnodes = Some(new_nodes);
 
-                for &particle in previous_particles.clone().iter().flatten() {
+                for &particle in previous_particles.clone().iter() {
                     self.insert_particle(node_idx, particle);
                 }
 
@@ -238,7 +238,7 @@ impl<'a> BarnesHutSimd<'a> {
             }
             None => match node.pseudoparticle {
                 OptionalMass::Particle(arr) => {
-                    for &particle in arr.iter().flatten() {
+                    for &particle in arr.iter() {
                         indices.push(particle)
                     }
                 }
@@ -379,16 +379,16 @@ impl<'a> BarnesHutSimd<'a> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 struct ParticleArray {
-    arr: [Option<usize>; 8],
+    arr: [usize; 8],
     len: usize,
 }
 
 impl ParticleArray {
     fn from_particle(particle: usize) -> Self {
-        let mut arr: [Option<usize>; 8] = [None; 8];
-        arr[0] = Some(particle);
+        let mut arr: [usize; 8] = Default::default();
+        arr[0] = particle;
         Self { arr, len: 1 }
     }
 
@@ -401,7 +401,7 @@ impl ParticleArray {
             return false;
         }
 
-        self.arr[self.len()] = Some(particle);
+        self.arr[self.len()] = particle;
         self.len += 1;
 
         true
@@ -409,8 +409,7 @@ impl ParticleArray {
 
     fn center_of_mass(&self, particles: &Particles) -> (f32, Vector3<f32>) {
         self.iter()
-            .filter_map(|par| *par)
-            .map(|par| (particles.masses[par], particles.velocities[par]))
+            .map(|&par| (particles.masses[par], particles.velocities[par]))
             .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
                 let m_sum = m_acc + m;
                 (m_sum, (pos_acc * m_acc + pos * m) / m_sum)
@@ -419,7 +418,7 @@ impl ParticleArray {
 
     fn masses(&self, particles: &Particles) -> WideF32x8 {
         let mut mass = [0.; 8];
-        for (i, &par) in self.arr.iter().flatten().enumerate() {
+        for (i, &par) in self.deref().iter().enumerate() {
             mass[i] = particles.masses[par];
         }
         mass.into()
@@ -427,7 +426,7 @@ impl ParticleArray {
 
     fn positions(&self, particles: &Particles) -> Vector3<WideF32x8> {
         let mut position: Vector3<WideF32x8> = Vector3::zeros();
-        for (i, &par) in self.arr.iter().flatten().enumerate() {
+        for (i, &par) in self.deref().iter().enumerate() {
             for (j, &pos) in particles.positions[par].iter().enumerate() {
                 position[j].replace(i, pos);
             }
@@ -436,15 +435,8 @@ impl ParticleArray {
     }
 }
 
-impl Default for ParticleArray {
-    fn default() -> Self {
-        let arr: [Option<usize>; 8] = [None; 8];
-        Self { arr, len: 0 }
-    }
-}
-
 impl Deref for ParticleArray {
-    type Target = [Option<usize>];
+    type Target = [usize];
 
     fn deref(&self) -> &Self::Target {
         &self.arr[0..self.len]
@@ -509,7 +501,7 @@ mod tests {
             false,
         );
 
-        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
+        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-15);
     }
 
     #[test]
@@ -525,7 +517,7 @@ mod tests {
         bh.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 
@@ -542,7 +534,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 
@@ -559,88 +551,7 @@ mod tests {
         bh_rayon.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use approx::assert_abs_diff_eq;
-
-//     use super::*;
-//     use crate::{generate_random_particles, Simulation, Step};
-
-//     #[test]
-//     fn symmetry() {
-//         let particle1 = GravitationalParticle::new(1e6, Vector3::new(1., 0., 0.), Vector3::zeros());
-//         let particle2 =
-//             GravitationalParticle::new(1e6, Vector3::new(-1., 0., 0.), Vector3::zeros());
-//         let acc = GravitationalAcceleration::new(0.);
-
-//         let mut accs = vec![Vector3::zeros(); 2];
-//         BarnesHutSimd::calculate_accelerations(
-//             &mut accs,
-//             &[particle1, particle2],
-//             0.,
-//             &acc,
-//             Execution::SingleThreaded,
-//         );
-
-//         assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
-//     }
-
-//     #[test]
-//     fn simd() {
-//         let acc = GravitationalAcceleration::new(1e-5);
-//         let particles = generate_random_particles(50);
-
-//         let mut bh_scalar = Simulation::new(particles.clone(), acc.clone(), 0.);
-//         let mut bh_simd = Simulation::new(particles, acc, 0.).simd();
-
-//         let mut acc_scalar = [Vector3::zeros(); 50];
-//         bh_scalar.step(1., &mut acc_scalar, Step::Middle);
-//         let mut acc_simd = [Vector3::zeros(); 50];
-//         bh_simd.step(1., &mut acc_simd, Step::Middle);
-
-//         for (s, m) in acc_scalar.into_iter().zip(acc_simd) {
-//             assert_abs_diff_eq!(s, m, epsilon = 1e-9);
-//         }
-//     }
-
-//     #[test]
-//     fn multithreaded() {
-//         let acc = GravitationalAcceleration::new(1e-5);
-//         let particles = generate_random_particles(50);
-
-//         let mut bh_scalar = Simulation::new(particles.clone(), acc.clone(), 0.);
-//         let mut bh_simd = Simulation::new(particles, acc, 0.).simd().multithreaded(2);
-
-//         let mut acc_scalar = [Vector3::zeros(); 50];
-//         bh_scalar.step(1., &mut acc_scalar, Step::Middle);
-//         let mut acc_simd = [Vector3::zeros(); 50];
-//         bh_simd.step(1., &mut acc_simd, Step::Middle);
-
-//         for (s, m) in acc_scalar.into_iter().zip(acc_simd) {
-//             assert_abs_diff_eq!(s, m, epsilon = 1e-9);
-//         }
-//     }
-
-//     #[test]
-//     fn rayon() {
-//         let acc = GravitationalAcceleration::new(1e-5);
-//         let particles = generate_random_particles(50);
-
-//         let mut bh_scalar = Simulation::new(particles.clone(), acc.clone(), 0.);
-//         let mut bh_simd = Simulation::new(particles, acc, 0.).simd().rayon_iter();
-
-//         let mut acc_scalar = [Vector3::zeros(); 50];
-//         bh_scalar.step(1., &mut acc_scalar, Step::Middle);
-//         let mut acc_simd = [Vector3::zeros(); 50];
-//         bh_simd.step(1., &mut acc_simd, Step::Middle);
-
-//         for (s, m) in acc_scalar.into_iter().zip(acc_simd) {
-//             assert_abs_diff_eq!(s, m, epsilon = 1e-9);
-//         }
-//     }
-// }

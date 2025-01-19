@@ -420,7 +420,7 @@ mod tests {
             false,
         );
 
-        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
+        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-15);
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 
@@ -471,29 +471,7 @@ mod tests {
         bh_rayon.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
-    }
-
-    #[test]
-    fn sorted_indices() {
-        const N: usize = 8;
-        let n_rt = (N as f64).powf(1. / 3.) as usize;
-
-        let masses = vec![1.; N];
-        let mut positions = vec![Vector3::zeros(); N];
-        for i in 0..n_rt {
-            for j in 0..n_rt {
-                for k in 0..n_rt {
-                    positions[i + n_rt * (j + n_rt * k)] =
-                        Vector3::new(i as f32, j as f32, k as f32);
-                }
-            }
-        }
-        let velocities = vec![Vector3::zeros(); N];
-        let particles = Particles::new(masses, positions, velocities);
-
-        let bh = BarnesHut::new(&particles, 0.);
-        dbg!(bh.sorted_indices());
     }
 }
