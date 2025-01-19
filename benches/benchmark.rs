@@ -208,7 +208,7 @@ fn optimization(c: &mut Criterion) {
     group.bench_function("standard", |b| {
         b.iter_batched_ref(
             || Simulation::new(particles.clone(), acc.clone(), 1.5),
-            |bh| bh.simulate(0.1, 1),
+            |bh| bh.simulate(0.1, 2),
             BatchSize::SmallInput,
         )
     });
@@ -221,7 +221,7 @@ fn optimization(c: &mut Criterion) {
                     .sorting(1)
                     .rayon_pool()
             },
-            |bh| bh.simulate(0.1, 1),
+            |bh| bh.simulate(0.1, 2),
             BatchSize::SmallInput,
         )
     });
