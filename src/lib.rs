@@ -1,11 +1,11 @@
 pub mod barnes_hut;
 pub mod brute_force;
 pub mod gravity;
-// pub mod particle_creator;
+pub mod particle_creator;
 #[cfg(feature = "simd")]
 pub mod simd;
-// #[cfg(feature = "visualization")]
-// pub mod visualization;
+#[cfg(feature = "visualization")]
+pub mod visualization;
 
 #[cfg(test)]
 mod csv;
@@ -265,12 +265,17 @@ impl Simulation {
         self
     }
 
-    /// Get an immutable reference to the particles.
+    /// Get an immutable reference to the particles' masses.
     pub fn masses(&self) -> &[f32] {
         &self.particles.masses
     }
 
-    /// Get an immutable reference to the particles.
+    /// Get an immutable reference to the particles' positions.
+    pub fn positions(&self) -> &[Vector3<f32>] {
+        &self.particles.positions
+    }
+
+    /// Get an immutable reference to the particles' velocities.
     pub fn velocities(&self) -> &[Vector3<f32>] {
         &self.particles.velocities
     }

@@ -9,26 +9,26 @@ edition = "2021"
 [features]
 randomization = ["rand", "rand_distr"]
 simd = ["simba"]
-# visualization = ["color-eyre", "blue_engine"]
+visualization = ["color-eyre", "blue_engine"]
 
 [dependencies]
-# blue_engine = { version = "0.5.20", optional = true }
-# color-eyre = { version = "0.6.3", optional = true }
-nalgebra = "0.32.6"
+blue_engine = { version = "0.6.2", optional = true }
+color-eyre = { version = "0.6.3", optional = true }
+nalgebra = "0.33.2"
 rand = { version = "0.8.5", optional = true }
 rand_distr = { version = "0.4.3", optional = true }
 rayon = { version = "1.10.0", optional = true }
-simba = { version = "0.8.1", optional = true }
+simba = { version = "0.9.0", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
 criterion = "0.5.1"
-nalgebra = { version = "0.32.6", features = ["rand"] }
+nalgebra = { version = "0.33.2", features = ["rand"] }
 barnes_hut = { path = ".", features = [
     "randomization",
     "rayon",
     "simd",
-    # "visualization",
+    "visualization",
 ] }
 
 [profile.dev]
@@ -37,13 +37,13 @@ opt-level = 3
 [[example]]
 name = "gravity"
 
-# [[example]]
-# name = "visualize_random"
-# required-features = ["randomization", "visualization"]
+[[example]]
+name = "visualize_random"
+required-features = ["randomization", "visualization"]
 
-# [[example]]
-# name = "visualize_central_body"
-# required-features = ["randomization", "visualization"]
+[[example]]
+name = "visualize_central_body"
+required-features = ["randomization", "visualization"]
 
 [[bench]]
 name = "benchmark"

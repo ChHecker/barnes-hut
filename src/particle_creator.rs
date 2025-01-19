@@ -1,121 +1,86 @@
-use crate::{interaction::Particle, Float};
+pub trait ParticleCreator {
+    fn create_particle(&mut self) -> (f32, Vector3<f32>, Vector3<f32>);
 
-pub trait ParticleCreator<F, P>
-where
-    F: Float,
-    P: Particle<F>,
-{
-    fn create_particle(&mut self) -> P;
-
-    fn create_particles(&mut self, n: u32) -> Vec<P> {
+    fn create_particles(&mut self, n: u32) -> Particles {
         (0..n).map(|_| self.create_particle()).collect()
     }
 }
 
+use nalgebra::Vector3;
 #[cfg(feature = "randomization")]
 pub use random::*;
 
+use crate::Particles;
+
 #[cfg(feature = "randomization")]
 mod random {
-    use std::marker::PhantomData;
-    use std::ops::Mul;
+    use std::f32::consts::PI;
 
     use nalgebra::Vector3;
     use rand::rngs::ThreadRng;
     use rand::Rng;
-    use rand_distr::uniform::SampleUniform;
     use rand_distr::{Distribution, Uniform};
 
     use super::*;
-    use crate::interaction::gravity::{GravitationalParticle, G};
-    use crate::interaction::{SamplableCharge, SamplableParticle};
+    use crate::gravity::G;
 
-    pub struct DistrParticleCreator<F, P, R, MD, CD, PD, VD>
+    pub struct DistrParticleCreator<R, MD, PD, VD>
     where
-        F: Float,
-        P: SamplableParticle<F>,
         R: Rng,
-        MD: Distribution<F>,
-        CD: Distribution<F>,
-        PD: Distribution<F>,
-        VD: Distribution<F>,
+        MD: Distribution<f32>,
+        PD: Distribution<f32>,
+        VD: Distribution<f32>,
     {
         rng: R,
         mass_distr: MD,
-        charge_distr: CD,
         position_distr: PD,
         velocity_distr: VD,
-        phantom: PhantomData<(F, P)>,
     }
 
-    impl<F, P, PD, VD, MD, CD> DistrParticleCreator<F, P, ThreadRng, MD, CD, PD, VD>
+    impl<PD, VD, MD> DistrParticleCreator<ThreadRng, MD, PD, VD>
     where
-        F: Float,
-        P: SamplableParticle<F>,
-        MD: Distribution<F>,
-        CD: Distribution<F>,
-        PD: Distribution<F>,
-        VD: Distribution<F>,
+        MD: Distribution<f32>,
+        PD: Distribution<f32>,
+        VD: Distribution<f32>,
     {
-        pub fn new(
-            mass_distr: MD,
-            charge_distr: CD,
-            position_distr: PD,
-            velocity_distr: VD,
-        ) -> Self {
+        pub fn new(mass_distr: MD, position_distr: PD, velocity_distr: VD) -> Self {
             Self {
                 rng: rand::thread_rng(),
                 mass_distr,
-                charge_distr,
                 position_distr,
                 velocity_distr,
-                phantom: PhantomData,
             }
         }
     }
 
-    impl<F, P, R, PD, VD, MD, CD> DistrParticleCreator<F, P, R, MD, CD, PD, VD>
+    impl<R, PD, VD, MD> DistrParticleCreator<R, MD, PD, VD>
     where
-        F: Float,
-        P: SamplableParticle<F>,
         R: Rng,
-        MD: Distribution<F>,
-        CD: Distribution<F>,
-        PD: Distribution<F>,
-        VD: Distribution<F>,
+        MD: Distribution<f32>,
+        PD: Distribution<f32>,
+        VD: Distribution<f32>,
     {
-        pub fn rng(
-            mass_distr: MD,
-            charge_distr: CD,
-            position_distr: PD,
-            velocity_distr: VD,
-            rng: R,
-        ) -> Self {
+        pub fn rng(mass_distr: MD, position_distr: PD, velocity_distr: VD, rng: R) -> Self {
             Self {
                 rng,
                 mass_distr,
-                charge_distr,
                 position_distr,
                 velocity_distr,
-                phantom: PhantomData,
             }
         }
     }
 
-    impl<F, P, R, PD, VD, MD, CD> ParticleCreator<F, P>
-        for DistrParticleCreator<F, P, R, MD, CD, PD, VD>
+    impl<R, PD, VD, MD> ParticleCreator for DistrParticleCreator<R, MD, PD, VD>
     where
-        F: Float,
-        P: SamplableParticle<F>,
         R: Rng,
-        MD: Distribution<F>,
-        CD: Distribution<F>,
-        PD: Distribution<F>,
-        VD: Distribution<F>,
+        MD: Distribution<f32>,
+        PD: Distribution<f32>,
+        VD: Distribution<f32>,
     {
-        fn create_particle(&mut self) -> P {
+        fn create_particle(&mut self) -> (f32, Vector3<f32>, Vector3<f32>) {
             let rng = &mut self.rng;
 
+            let m = self.mass_distr.sample(rng);
             let pos = Vector3::new(
                 self.position_distr.sample(rng),
                 self.position_distr.sample(rng),
@@ -127,35 +92,29 @@ mod random {
                 self.velocity_distr.sample(rng),
             );
 
-            P::particle(
-                self.mass_distr.sample(rng),
-                P::SamplableCharge::sample(&self.charge_distr, rng),
-                pos,
-                vel,
-            )
+            (m, pos, vel)
         }
     }
 
     #[derive(Clone)]
-    pub struct CentralBodyParticleCreator<F, MD, RD>
+    pub struct CentralBodyParticleCreator<MD, RD>
     where
-        MD: Distribution<F>,
-        RD: Distribution<F>,
+        MD: Distribution<f32>,
+        RD: Distribution<f32>,
     {
         rng: ThreadRng,
-        central_mass: F,
+        central_mass: f32,
         mass_distr: MD,
         radial_distr: RD,
         first_par: bool,
     }
 
-    impl<F, MD, RD> CentralBodyParticleCreator<F, MD, RD>
+    impl<MD, RD> CentralBodyParticleCreator<MD, RD>
     where
-        F: Float,
-        MD: Distribution<F>,
-        RD: Distribution<F>,
+        MD: Distribution<f32>,
+        RD: Distribution<f32>,
     {
-        pub fn new(central_mass: F, mass_distr: MD, radial_distr: RD) -> Self {
+        pub fn new(central_mass: f32, mass_distr: MD, radial_distr: RD) -> Self {
             Self {
                 rng: rand::thread_rng(),
                 central_mass,
@@ -166,34 +125,28 @@ mod random {
         }
     }
 
-    impl<F, MD, RD> ParticleCreator<F, GravitationalParticle<F>>
-        for CentralBodyParticleCreator<F, MD, RD>
+    impl<MD, RD> ParticleCreator for CentralBodyParticleCreator<MD, RD>
     where
-        F: Float + SampleUniform + Mul<Vector3<F>, Output = Vector3<F>>,
-        MD: Distribution<F>,
-        RD: Distribution<F>,
+        MD: Distribution<f32>,
+        RD: Distribution<f32>,
     {
-        fn create_particle(&mut self) -> GravitationalParticle<F> {
+        fn create_particle(&mut self) -> (f32, Vector3<f32>, Vector3<f32>) {
             if self.first_par {
                 self.first_par = false;
 
-                return GravitationalParticle::new(
-                    self.central_mass,
-                    Vector3::zeros(),
-                    Vector3::zeros(),
-                );
+                return (self.central_mass, Vector3::zeros(), Vector3::zeros());
             }
 
             let rng = &mut self.rng;
 
             let r = self.radial_distr.sample(rng);
-            let phi = Uniform::new(F::zero(), F::two_pi()).sample(rng);
-            let pos = Vector3::new(r * phi.cos(), r * phi.sin(), F::zero());
+            let phi: f32 = Uniform::new(0., 2. * PI).sample(rng);
+            let pos = Vector3::new(r * phi.cos(), r * phi.sin(), 0.);
 
-            let mut vel = Vector3::new(-phi.sin(), phi.cos(), F::zero());
-            vel *= (F::from_f64(G).unwrap() * self.central_mass / r).sqrt();
+            let mut vel = Vector3::new(-phi.sin(), phi.cos(), 0.);
+            vel *= (G * self.central_mass / r).sqrt();
 
-            GravitationalParticle::new(self.mass_distr.sample(rng), pos, vel)
+            (self.mass_distr.sample(rng), pos, vel)
         }
     }
 
@@ -201,15 +154,12 @@ mod random {
     mod tests {
         use approx::assert_abs_diff_eq;
 
-        use crate::interaction::gravity::GravitationalAcceleration;
-        use crate::Simulation;
-
         use super::*;
+        use crate::Simulation;
 
         #[test]
         fn test_central_body() {
             let num_steps = 1000;
-            let acc = GravitationalAcceleration::new(1e-4f64);
 
             let mut pc = CentralBodyParticleCreator::new(
                 1e10,
@@ -218,7 +168,7 @@ mod random {
             );
             let par = pc.create_particles(2);
 
-            let mut bh = Simulation::new(par, acc, 0.);
+            let mut bh = Simulation::new(par, 1e-4, 0.);
             let pos = bh.simulate(0.1, num_steps);
 
             let last = pos.row(num_steps);

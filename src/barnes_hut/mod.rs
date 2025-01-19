@@ -38,37 +38,37 @@ impl PointMass {
 
 type Subnodes<N> = [Option<N>; 8];
 
-trait Node<'a>
+trait Node
 where
     Self: Sized,
 {
-    fn new(particles: &'a Particles, center: Vector3<f32>, width: f32, index: usize) -> Self;
+    fn new(center: Vector3<f32>, width: f32, index: usize) -> Self;
 
-    fn from_particles(particles: &'a Particles) -> Self {
+    fn from_particles(particles: &Particles) -> Self {
         let (center, width) = Self::get_center_and_width(&particles.positions);
 
-        let mut node = Self::new(particles, center, width, 0);
+        let mut node = Self::new(center, width, 0);
 
         for i in 1..particles.len() {
-            node.insert_particle(i);
+            node.insert_particle(particles, i);
         }
 
-        node.calculate_mass();
+        node.calculate_mass(particles);
 
         node
     }
 
-    fn from_indices(particles: &'a Particles, indices: &[usize]) -> Self {
+    fn from_indices(particles: &Particles, indices: &[usize]) -> Self {
         let (center, width) = Self::get_center_and_width(&particles.positions);
 
         let mut iter = indices.iter();
-        let mut node = Self::new(particles, center, width, *iter.next().unwrap());
+        let mut node = Self::new(center, width, *iter.next().unwrap());
 
         for &i in iter {
-            node.insert_particle(i);
+            node.insert_particle(particles, i);
         }
 
-        node.calculate_mass();
+        node.calculate_mass(particles);
 
         node
     }
@@ -92,11 +92,17 @@ where
         (center, width)
     }
 
-    fn insert_particle(&mut self, index: usize);
+    fn insert_particle(&mut self, particles: &Particles, index: usize);
 
-    fn calculate_mass(&mut self);
+    fn calculate_mass(&mut self, particles: &Particles);
 
-    fn calculate_acceleration(&self, particle: usize, epsilon: f32, theta: f32) -> Vector3<f32>;
+    fn calculate_acceleration(
+        &self,
+        particles: &Particles,
+        particle: usize,
+        epsilon: f32,
+        theta: f32,
+    ) -> Vector3<f32>;
 
     fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
         if position.x > center.x {

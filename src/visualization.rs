@@ -1,37 +1,24 @@
 use std::time::Instant;
 
-use crate::{particle_creator::ParticleCreator, Float, Particle, Simulation, Step};
+use crate::{particle_creator::ParticleCreator, Simulation, Step};
 #[cfg(feature = "simd")]
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
 use nalgebra::Vector3;
 
 /// Visualize the Barnes-Hut algorithm.
-pub struct Visualizer<F, P>
-where
-    F: Float,
-    P: Particle<F> + Sync + Send + 'static,
-{
+pub struct Visualizer {
     engine: Engine,
-    simulator: Simulation<F, P, Vec<P>>,
+    simulator: Simulation,
 }
 
-impl<F, P> Visualizer<F, P>
-where
-    F: Float,
-    P: Particle<F> + Sync + Send + 'static,
-    P::Acceleration: Send + Sync,
-{
+impl Visualizer {
     /// Create a new visualizer.
     ///
     /// # Arguments
     /// - `simulator`: A [`Simulation`] struct.
     /// - `width`: Width of the window.
     /// - `height`: Height of the window.
-    pub fn new(
-        simulator: Simulation<F, P, Vec<P>>,
-        width: u32,
-        height: u32,
-    ) -> color_eyre::Result<Self> {
+    pub fn new(simulator: Simulation, width: u32, height: u32) -> color_eyre::Result<Self> {
         let mut engine = Engine::new_config(WindowDescriptor {
             width,
             height,
@@ -39,27 +26,27 @@ where
             ..Default::default()
         })?;
 
-        for (i, par) in simulator.particles().iter().enumerate() {
+        for (i, m) in simulator.masses().iter().enumerate() {
             uv_sphere(
                 format!("particle{i}"),
-                (8, 20, par.mass().log10().to_subset().unwrap() as f32 / 50.),
+                (8, 20, m.log10() / 50.),
                 &mut engine.renderer,
                 &mut engine.objects,
-            )?;
+            );
         }
         Ok(Self { engine, simulator })
     }
 
-    pub fn from_particle_creator<Pc: ParticleCreator<F, P>>(
+    pub fn from_particle_creator<Pc: ParticleCreator>(
         mut particle_creator: Pc,
         num_particles: u32,
-        acceleration: P::Acceleration,
-        theta: F,
+        epsilon: f32,
+        theta: f32,
         width: u32,
         height: u32,
     ) -> color_eyre::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
-        let barnes_hut = Simulation::new(particles, acceleration, theta);
+        let barnes_hut = Simulation::new(particles, epsilon, theta);
 
         Self::new(barnes_hut, width, height)
     }
@@ -84,30 +71,26 @@ where
     /// # Arguments
     /// - `speed`: How much faster the simulation should run than real time.
     /// - `theta`: Barnes-Hut parameter to pass to [`BarnesHut::simulate()`].
-    pub fn visualize(mut self, speed: F) -> color_eyre::Result<()> {
-        let n = self.simulator.particles().len();
+    pub fn visualize(mut self, speed: f32) -> color_eyre::Result<()> {
+        let n = self.simulator.masses().len();
 
-        let mut acceleration = vec![Vector3::zeros(); n];
+        let mut accelerations = vec![Vector3::zeros(); n];
 
         let mut time = Instant::now();
         let mut current_step = Step::First;
 
+        dbg!(&self.simulator);
+
         self.engine.update_loop(move |_, _, objects, _, _, _| {
-            let step = F::from_f64(time.elapsed().as_secs_f64()).unwrap() * speed;
-            println!("FPS: {}", 1. / time.elapsed().as_secs_f64());
-            self.simulator.step(step, &mut acceleration, current_step);
+            let step = time.elapsed().as_secs_f32() * speed;
+            // println!("FPS: {}", 1. / time.elapsed().as_secs_f64());
+            self.simulator.step(&mut accelerations, step, current_step);
 
-            for (i, par) in self.simulator.particles().iter().enumerate() {
-                let pos = par.position();
-
+            for (i, pos) in self.simulator.positions().iter().enumerate() {
                 let obj = objects.get_mut(&format!("particle{i}")).unwrap();
-                obj.set_position(
-                    pos.x.to_subset().unwrap() as f32,
-                    pos.y.to_subset().unwrap() as f32,
-                    pos.z.to_subset().unwrap() as f32,
-                );
+                obj.set_position([pos.x, pos.y, pos.z]);
 
-                let col = (0.5 * (pos.z.to_subset().unwrap() as f32 + 2.) + 0.3).clamp(0.2, 1.);
+                let col = (0.5 * (pos.z + 2.) + 0.3).clamp(0.2, 1.);
                 obj.set_color(col, col, col, 1.);
             }
 
