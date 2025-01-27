@@ -384,7 +384,7 @@ mod tests {
             false,
         );
 
-        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-9);
+        assert_abs_diff_eq!(accs[0], -accs[1], epsilon = 1e-15);
     }
 
     #[test]
@@ -400,7 +400,7 @@ mod tests {
         bh.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 
@@ -417,7 +417,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 
@@ -434,7 +434,7 @@ mod tests {
         bh_rayon.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m, epsilon = 1e-6);
+            assert_abs_diff_eq!(s, m, epsilon = 1e-15);
         }
     }
 }
