@@ -16,6 +16,9 @@ use nalgebra::{DMatrix, Vector3};
 #[cfg(feature = "simd")]
 use barnes_hut::BarnesHutSimd;
 
+/// A collection of particles.
+///
+/// This struct is used to utilize the Struct-of-Arrays (SOA) architecture.
 #[derive(Clone, Debug)]
 pub struct Particles {
     masses: Vec<f32>,
@@ -89,16 +92,16 @@ pub enum Sorting {
     EveryNIteration(usize),
 }
 
+/// All possible algorithms offered in this crate.
 #[derive(Copy, Clone, Debug)]
 pub enum Simulator {
+    /// Direct O(n^2) force summation.
     BruteForce,
-    BarnesHut {
-        theta: f32,
-    },
+    /// Classical Barnes-Hut using monopoles.
+    BarnesHut { theta: f32 },
+    /// Barnes-Hut using SIMD.
     #[cfg(feature = "simd")]
-    BarnesHutSimd {
-        theta: f32,
-    },
+    BarnesHutSimd { theta: f32 },
 }
 
 impl Simulator {
@@ -258,6 +261,7 @@ impl Simulation {
         self
     }
 
+    /// How frequently to sort the particles.
     pub fn sorting(mut self, every_n_iterations: usize) -> Self {
         if every_n_iterations != 0 {
             self.sorting = Sorting::EveryNIteration(every_n_iterations);
@@ -283,9 +287,9 @@ impl Simulation {
     /// Do a single simulation step.
     ///
     /// # Arguments
+    /// - `accelerations`: The slice to store the accelerations in. Used to avoid allocations.
     /// - `time_step`: Size of each time step.
-    /// - `acceleration`: The slice to store the accelerations in. Used to avoid allocations.
-    /// - `current_step`: Whether the step is the first, last, or in between.
+    /// - `current_step`: Whether the step is the first, last, or in between; or sorting is desired.
     ///     Used to do an Euler step in the beginning and end.
     pub fn step(&mut self, accelerations: &mut [Vector3<f32>], time_step: f32, current_step: Step) {
         let sort = matches!(current_step, Step::Sort);
