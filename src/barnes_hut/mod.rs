@@ -16,24 +16,21 @@ macro_rules! unreachable_debug {
     };
 }
 
-mod scalar;
-pub use scalar::*;
-
+// pub mod hash;
+pub mod scalar;
 #[cfg(feature = "simd")]
-mod simd;
-#[cfg(feature = "simd")]
-pub use simd::*;
+pub mod simd;
 
-use crate::Particles;
+use crate::{Float, Particles};
 
 #[derive(Clone, Debug)]
 pub struct PointMass {
-    pub mass: f32,
-    pub position: Vector3<f32>,
+    pub mass: Float,
+    pub position: Vector3<Float>,
 }
 
 impl PointMass {
-    pub fn new(mass: f32, position: Vector3<f32>) -> Self {
+    pub fn new(mass: Float, position: Vector3<Float>) -> Self {
         Self { mass, position }
     }
 }
@@ -61,7 +58,39 @@ impl DerefMut for Subnodes {
     }
 }
 
-fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
+/// Only yield the elements in `indices`.
+/// WARNING: `indices` has to be sorted!
+struct IndexFilteredIter<'a, I: Iterator, J: IntoIterator<Item = &'a usize>> {
+    iter: I,
+    indices: J::IntoIter,
+    idx: usize,
+}
+
+impl<'a, I: Iterator, J: IntoIterator<Item = &'a usize>> IndexFilteredIter<'a, I, J> {
+    fn new(iter: I, indices: J) -> Self {
+        Self {
+            iter,
+            indices: indices.into_iter(),
+            idx: 0,
+        }
+    }
+}
+
+impl<'a, I: Iterator, J: IntoIterator<Item = &'a usize>> Iterator for IndexFilteredIter<'a, I, J> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let iter_idx_next = self.indices.next()?;
+        let item = self.iter.nth(iter_idx_next - self.idx);
+        self.idx = iter_idx_next + 1;
+
+        item
+    }
+}
+
+fn get_center_and_width<'a, I: Iterator<Item = &'a Vector3<Float>>>(
+    positions: I,
+) -> (Vector3<Float>, Float) {
     let mut v_min = Vector3::zeros();
     let mut v_max = Vector3::zeros();
     for pos in positions {
@@ -80,7 +109,7 @@ fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
     (center, width)
 }
 
-fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
+fn choose_subnode(center: &Vector3<Float>, position: &Vector3<Float>) -> usize {
     if position.x > center.x {
         if position.y > center.y {
             if position.z > center.z {
@@ -105,7 +134,7 @@ fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
     6
 }
 
-fn center_from_subnode(width: f32, center: Vector3<f32>, i: usize) -> Vector3<f32> {
+fn center_from_subnode(width: Float, center: Vector3<Float>, i: usize) -> Vector3<Float> {
     let step_size = width / 2.;
     if i == 0 {
         return center + Vector3::new(step_size, step_size, step_size);
@@ -136,7 +165,7 @@ fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec
         unimplemented!()
     }
 
-    let (center, _) = get_center_and_width(&particles.positions);
+    let (center, _) = get_center_and_width(particles.positions.iter());
     let mut local_particles: Vec<Vec<usize>> = vec![Vec::new(); num_threads];
     for i in 0..particles.len() {
         let subnode = choose_subnode(&center, &particles.positions[i]);
@@ -161,6 +190,22 @@ pub fn sort_particles(particles: &mut Particles, indices: &mut [usize]) {
                 particles.velocities.swap(current_idx, target_idx);
                 current_idx = target_idx;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_index_filtered_iter() {
+        let vec: Vec<usize> = (0..10).collect();
+        let indices = [1, 4, 5, 7, 9];
+        let iter = IndexFilteredIter::new(vec.iter(), &indices);
+
+        for (i, &x) in iter.enumerate() {
+            assert_eq!(x, indices[i]);
         }
     }
 }

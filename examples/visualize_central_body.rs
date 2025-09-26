@@ -4,7 +4,7 @@
 // };
 // use rand_distr::{Normal, Uniform};
 
-// const SPEED: f32 = 1.;
+// const SPEED: Float = 1.;
 
 fn main() {
     //     // Generate random particles.

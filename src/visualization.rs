@@ -42,7 +42,7 @@ where
         for (i, par) in simulator.particles().iter().enumerate() {
             uv_sphere(
                 format!("particle{i}"),
-                (8, 20, par.mass().log10().to_subset().unwrap() as f32 / 50.),
+                (8, 20, par.mass().log10().to_subset().unwrap() as Float / 50.),
                 &mut engine.renderer,
                 &mut engine.objects,
             )?;
@@ -102,12 +102,12 @@ where
 
                 let obj = objects.get_mut(&format!("particle{i}")).unwrap();
                 obj.set_position(
-                    pos.x.to_subset().unwrap() as f32,
-                    pos.y.to_subset().unwrap() as f32,
-                    pos.z.to_subset().unwrap() as f32,
+                    pos.x.to_subset().unwrap() as Float,
+                    pos.y.to_subset().unwrap() as Float,
+                    pos.z.to_subset().unwrap() as Float,
                 );
 
-                let col = (0.5 * (pos.z.to_subset().unwrap() as f32 + 2.) + 0.3).clamp(0.2, 1.);
+                let col = (0.5 * (pos.z.to_subset().unwrap() as Float + 2.) + 0.3).clamp(0.2, 1.);
                 obj.set_color(col, col, col, 1.);
             }
 

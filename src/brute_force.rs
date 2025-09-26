@@ -4,12 +4,12 @@ use nalgebra::Vector3;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::{gravity, Execution, Particles};
+use crate::{gravity, Execution, Float, Particles};
 
 pub fn calculate_accelerations(
     particles: &Particles,
-    accelerations: &mut [Vector3<f32>],
-    epsilon: f32,
+    accelerations: &mut [Vector3<Float>],
+    epsilon: Float,
     execution: Execution,
 ) {
     match execution {

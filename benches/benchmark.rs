@@ -1,4 +1,4 @@
-use barnes_hut::{Particles, Simulation};
+use barnes_hut::{Float, Particles, Simulation};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -15,7 +15,7 @@ fn particles(c: &mut Criterion) {
                         .map(|_| {
                             (
                                 rng.gen_range(0.0..1000.0),
-                                10f32 * Vector3::new_random(),
+                                10. as Float * Vector3::new_random(),
                                 Vector3::new_random(),
                             )
                         })
@@ -34,7 +34,7 @@ fn particles(c: &mut Criterion) {
                         .map(|_| {
                             (
                                 rng.gen_range(0.0..1000.0),
-                                10f32 * Vector3::new_random(),
+                                10. as Float * Vector3::new_random(),
                                 Vector3::new_random(),
                             )
                         })
@@ -56,7 +56,7 @@ fn particles(c: &mut Criterion) {
                             .map(|_| {
                                 (
                                     rng.gen_range(0.0..1000.0),
-                                    10f32 * Vector3::new_random(),
+                                    10. as Float * Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
@@ -79,7 +79,7 @@ fn particles(c: &mut Criterion) {
                             .map(|_| {
                                 (
                                     rng.gen_range(0.0..1000.0),
-                                    10f32 * Vector3::new_random(),
+                                    10. as Float * Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
@@ -102,7 +102,7 @@ fn particles(c: &mut Criterion) {
                             .map(|_| {
                                 (
                                     rng.gen_range(0.0..1000.0),
-                                    10f32 * Vector3::new_random(),
+                                    10. as Float * Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
@@ -124,7 +124,7 @@ fn theta(c: &mut Criterion) {
         .map(|_| {
             (
                 rng.gen_range(0.0..1000.0),
-                10f32 * Vector3::new_random(),
+                10. as Float * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -157,7 +157,7 @@ fn sorting(c: &mut Criterion) {
         .map(|_| {
             (
                 rng.gen_range(0.0..1000.0),
-                10f32 * Vector3::new_random(),
+                10. as Float * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -186,7 +186,7 @@ fn optimization(c: &mut Criterion) {
         .map(|_| {
             (
                 rng.gen_range(0.0..1000.0),
-                10f32 * Vector3::new_random(),
+                10. as Float * Vector3::new_random(),
                 Vector3::new_random(),
             )
         })

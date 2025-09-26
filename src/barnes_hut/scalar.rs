@@ -15,16 +15,16 @@ pub(super) enum OptionalMass {
 
 #[derive(Debug)]
 pub struct BarnesHut<'a> {
-    nodes: Vec<ScalarNode>,
+    nodes: Vec<Node>,
     particles: &'a Particles,
-    theta: f32,
+    theta: Float,
 }
 
 impl<'a> BarnesHut<'a> {
-    pub fn new(particles: &'a Particles, theta: f32) -> Self {
-        let (center, width) = get_center_and_width(&particles.positions);
+    pub fn new(particles: &'a Particles, theta: Float) -> Self {
+        let (center, width) = get_center_and_width(particles.positions.iter());
         let mut nodes = Vec::with_capacity(particles.len());
-        nodes.push(ScalarNode::new(center, width, 0));
+        nodes.push(Node::new(center, width, 0));
         let mut ret = Self {
             nodes,
             particles,
@@ -36,11 +36,12 @@ impl<'a> BarnesHut<'a> {
         ret
     }
 
-    pub fn from_indices(particles: &'a Particles, indices: &[usize], theta: f32) -> Self {
-        let (center, width) = get_center_and_width(&particles.positions); // TODO: look at indices?
+    pub fn from_indices(particles: &'a Particles, indices: &[usize], theta: Float) -> Self {
+        let filtered_positions = IndexFilteredIter::new(particles.positions.iter(), indices);
+        let (center, width) = get_center_and_width(filtered_positions);
         let mut iter = indices.iter();
         let mut nodes = Vec::with_capacity(particles.len());
-        nodes.push(ScalarNode::new(center, width, *iter.next().unwrap()));
+        nodes.push(Node::new(center, width, *iter.next().unwrap()));
         let mut ret = Self {
             nodes,
             particles,
@@ -63,7 +64,7 @@ impl<'a> BarnesHut<'a> {
 
                 match subnodes[new_subnode_idx] {
                     usize::MAX => {
-                        let new_node = ScalarNode::new(
+                        let new_node = Node::new(
                             center_from_subnode(width, center, new_subnode_idx),
                             width / 2.,
                             particle,
@@ -104,7 +105,7 @@ impl<'a> BarnesHut<'a> {
         // Create subnode for previous particle
         let previous_spatial_index =
             choose_subnode(center, &self.particles.positions[previous_particle]);
-        let previous_node = ScalarNode::new(
+        let previous_node = Node::new(
             center_from_subnode(width, *center, previous_spatial_index),
             width / 2.,
             previous_particle,
@@ -115,7 +116,7 @@ impl<'a> BarnesHut<'a> {
         // (self.insert_particle would crash because one node wouldn't have a mass yet)
         // Otherwise, call insert on self below so self can be subdivided again
         if new_spatial_index != previous_spatial_index {
-            let new_node = ScalarNode::new(
+            let new_node = Node::new(
                 center_from_subnode(width, *center, new_spatial_index),
                 width / 2.,
                 new_particle,
@@ -134,12 +135,12 @@ impl<'a> BarnesHut<'a> {
         self.calculate_mass(node_idx);
     }
 
-    fn insert_subnode(&mut self, node: ScalarNode, subnodes: &mut Subnodes, subnode_idx: usize) {
+    fn insert_subnode(&mut self, node: Node, subnodes: &mut Subnodes, subnode_idx: usize) {
         subnodes[subnode_idx] = self.nodes.len();
         self.nodes.push(node);
     }
 
-    fn insert_subnode_self(&mut self, node: ScalarNode, node_idx: usize, subnode_idx: usize) {
+    fn insert_subnode_self(&mut self, node: Node, node_idx: usize, subnode_idx: usize) {
         self.nodes[node_idx].subnodes.as_mut().unwrap()[subnode_idx] = self.nodes.len();
         self.nodes.push(node);
     }
@@ -173,9 +174,9 @@ impl<'a> BarnesHut<'a> {
         &self,
         node_idx: usize,
         particle: usize,
-        epsilon: f32,
-        theta: f32,
-    ) -> Vector3<f32> {
+        epsilon: Float,
+        theta: Float,
+    ) -> Vector3<Float> {
         let node = &self.nodes[node_idx];
         let mut acc = Vector3::zeros();
 
@@ -247,15 +248,15 @@ impl<'a> BarnesHut<'a> {
         println!();
     }
 
-    pub fn calculate_acceleration(&self, particle: usize, epsilon: f32) -> Vector3<f32> {
+    pub fn calculate_acceleration(&self, particle: usize, epsilon: Float) -> Vector3<Float> {
         self.calculate_acceleration_recursive(0, particle, epsilon, self.theta)
     }
 
     pub fn calculate_accelerations(
         particles: &'a Particles,
-        accelerations: &mut [Vector3<f32>],
-        epsilon: f32,
-        theta: f32,
+        accelerations: &mut [Vector3<Float>],
+        epsilon: Float,
+        theta: Float,
         execution: Execution,
         sort: bool,
     ) -> Option<Vec<usize>> {
@@ -378,15 +379,15 @@ impl<'a> BarnesHut<'a> {
 }
 
 #[derive(Debug)]
-struct ScalarNode {
+struct Node {
     subnodes: Option<Subnodes>,
     pseudoparticle: OptionalMass,
-    center: Vector3<f32>,
-    width: f32,
+    center: Vector3<Float>,
+    width: Float,
 }
 
-impl ScalarNode {
-    fn new(center: Vector3<f32>, width: f32, particle: usize) -> Self {
+impl Node {
+    fn new(center: Vector3<Float>, width: Float, particle: usize) -> Self {
         Self {
             subnodes: None,
             pseudoparticle: OptionalMass::Particle(particle),

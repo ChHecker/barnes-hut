@@ -1,4 +1,4 @@
-use barnes_hut::{Particles, Simulation, Sorting, Step};
+use barnes_hut::{Float, Particles, Simulation, Sorting, Step};
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -10,8 +10,8 @@ fn main() {
         .map(|_| {
             (
                 rng.gen_range(0.0..100.0),
-                1000f32 * Vector3::new_random() - Vector3::new(500., 500., 500.),
-                10f32 * Vector3::new_random(),
+                1000. as Float * Vector3::new_random() - Vector3::new(500., 500., 500.),
+                10. as Float * Vector3::new_random(),
             )
         })
         .collect::<Particles>();

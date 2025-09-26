@@ -1,30 +1,31 @@
 use nalgebra::{SimdComplexField, SimdValue, Vector3};
-use simba::simd::WideF32x8;
 
-pub const G: f32 = 6.6743015e-11;
+use crate::{simd::SimdFloat, Float};
+
+pub const G: Float = 6.6743015e-11;
 
 pub fn acceleration(
-    position1: Vector3<f32>,
-    mass2: f32,
-    position2: Vector3<f32>,
-    epsilon: f32,
-) -> Vector3<f32> {
+    position1: Vector3<Float>,
+    mass2: Float,
+    position2: Vector3<Float>,
+    epsilon: Float,
+) -> Vector3<Float> {
     let r = position2 - position1;
     let r_square = r.norm_squared();
     r * G * mass2 / (r_square + epsilon).sqrt().powi(3)
 }
 
 pub fn acceleration_simd(
-    position1: Vector3<f32>,
-    mass2: WideF32x8,
-    position2: Vector3<WideF32x8>,
-    epsilon: f32,
-) -> Vector3<WideF32x8> {
-    let pos = Vector3::<WideF32x8>::splat(position1);
+    position1: Vector3<Float>,
+    mass2: SimdFloat,
+    position2: Vector3<SimdFloat>,
+    epsilon: Float,
+) -> Vector3<SimdFloat> {
+    let pos = Vector3::<SimdFloat>::splat(position1);
     let r = position2 - pos;
     let r_square = r.norm_squared();
-    r * WideF32x8::splat(G) * mass2
-        / (r_square + WideF32x8::splat(epsilon))
+    r * SimdFloat::splat(G) * mass2
+        / (r_square + SimdFloat::splat(epsilon))
             .simd_sqrt()
             .simd_powi(3)
 }

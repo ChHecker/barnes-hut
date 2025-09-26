@@ -6,7 +6,7 @@
 // use rand::{rngs::StdRng, SeedableRng};
 // use rand_distr::{Normal, Uniform};
 
-// const SPEED: f32 = 100.;
+// const SPEED: Float = 100.;
 
 fn main() {
     // let rng = StdRng::seed_from_u64(0);
@@ -21,7 +21,7 @@ fn main() {
     // let pc = DistrParticleCreator::rng(uniform_mass, uniform_mass, normal_pos, normal_vel, rng);
 
     // // Visualize.
-    // let vis: Visualizer<f32, GravitationalParticle<f32>> =
+    // let vis: Visualizer<Float, GravitationalParticle<Float>> =
     //     Visualizer::from_particle_creator(pc, 200, acc, 1.5, 1920, 1080).unwrap();
     // vis.visualize(SPEED).unwrap();
 }
