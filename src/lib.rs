@@ -10,12 +10,9 @@ pub mod visualization;
 #[cfg(test)]
 mod csv;
 
-use barnes_hut::BarnesHut;
-use nalgebra::{DMatrix, Vector3};
-use particles::Particles;
+pub use particles::Particles;
 
-#[cfg(feature = "simd")]
-use barnes_hut::BarnesHutSimd;
+use nalgebra::{DMatrix, Vector3};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Execution {
@@ -79,6 +76,7 @@ impl Step {
 /// ```rust
 /// # use nalgebra::Vector3;
 /// # use barnes_hut::{Simulation, Particles};
+/// # use barnes_hut::barnes_hut::BarnesHutSimd;
 /// let particles: Particles = (0..1_000).map(|_| {
 ///         (
 ///             1e6,
@@ -87,8 +85,9 @@ impl Step {
 ///         )
 ///     }).collect();
 ///
-/// let mut bh = Simulation::new(particles, 1e-5, 1.5).simd().multithreaded(4);
-/// bh.simulate(
+/// let bh = BarnesHutSimd::new(1.5);
+/// let mut sim = Simulation::new(particles, bh, 1e-5).multithreaded(4);
+/// sim.simulate(
 ///     0.1,
 ///     100
 /// );
@@ -103,7 +102,7 @@ pub struct Simulation<S: ShortRangeSolver> {
 }
 
 impl<S: ShortRangeSolver> Simulation<S> {
-    pub fn new(short_range_solver: S, particles: Particles, epsilon: f32) -> Self {
+    pub fn new(particles: Particles, short_range_solver: S, epsilon: f32) -> Self {
         Self {
             particles,
             short_range_solver,

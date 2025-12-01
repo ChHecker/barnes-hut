@@ -1,4 +1,4 @@
-use barnes_hut::{particle_creator::DistrParticleCreator, visualization::Visualizer};
+use barnes_hut::{barnes_hut::BarnesHutSimd, particles::creator::DistrParticleCreator, visualization::Visualizer};
 use rand::{rngs::StdRng, SeedableRng};
 use rand_distr::{Normal, Uniform};
 
@@ -16,6 +16,7 @@ fn main() {
     let pc = DistrParticleCreator::rng(uniform_mass, normal_pos, normal_vel, rng);
 
     // Visualize.
-    let vis = Visualizer::from_particle_creator(pc, 50, epsilon, 1.5, 1920, 1080).unwrap();
+    let bh = BarnesHutSimd::new(1.5);
+    let vis = Visualizer::from_particle_creator(pc, bh, 50, epsilon, 1920, 1080).unwrap();
     vis.visualize(SPEED).unwrap();
 }

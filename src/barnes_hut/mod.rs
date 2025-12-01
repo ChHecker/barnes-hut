@@ -9,7 +9,7 @@ macro_rules! unreachable_debug {
 
 #[cfg(not(debug_assertions))]
 macro_rules! unreachable_debug {
-    ($arg:tt) => {
+    ($arg:expr) => {
         ()
     };
 }

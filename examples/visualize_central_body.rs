@@ -1,4 +1,4 @@
-use barnes_hut::{particle_creator::CentralBodyParticleCreator, visualization::Visualizer};
+use barnes_hut::{barnes_hut::BarnesHutSimd, particles::creator::CentralBodyParticleCreator, visualization::Visualizer};
 use rand_distr::{Normal, Uniform};
 
 const SPEED: f32 = 1.;
@@ -11,6 +11,7 @@ fn main() {
     let pc = CentralBodyParticleCreator::new(1e10, uniform_mass, normal_rad);
 
     // Visualize.
-    let vis = Visualizer::from_particle_creator(pc, 2, 0., 0., 1920, 1080).unwrap();
+    let bh = BarnesHutSimd::new(0.);
+    let vis: Visualizer<BarnesHutSimd> = Visualizer::from_particle_creator(pc, bh, 2, 0., 1920, 1080).unwrap();
     vis.visualize(SPEED).unwrap();
 }

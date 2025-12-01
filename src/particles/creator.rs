@@ -155,7 +155,7 @@ mod random {
         use approx::assert_abs_diff_eq;
 
         use super::*;
-        use crate::Simulation;
+        use crate::{Simulation, barnes_hut::BarnesHut};
 
         #[test]
         fn test_central_body() {
@@ -168,7 +168,8 @@ mod random {
             );
             let par = pc.create_particles(2);
 
-            let mut bh = Simulation::new(par, 1e-4, 0.);
+            let bh = BarnesHut::new(0.);
+            let mut bh = Simulation::new(par, bh, 0.);
             let pos = bh.simulate(0.1, num_steps);
 
             let last = pos.row(num_steps);

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::{ShortRangeSolver, Simulation, Step, barnes_hut::BarnesHut, particles::creator::ParticleCreator};
+use crate::{particles::creator::ParticleCreator, ShortRangeSolver, Simulation, Step};
 #[cfg(feature = "simd")]
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
 use nalgebra::Vector3;
@@ -11,7 +11,7 @@ pub struct Visualizer<S: ShortRangeSolver> {
     simulator: Simulation<S>,
 }
 
-impl<S: ShortRangeSolver> Visualizer<S> {
+impl<S: 'static + ShortRangeSolver> Visualizer<S> {
     /// Create a new visualizer.
     ///
     /// # Arguments
@@ -37,21 +37,6 @@ impl<S: ShortRangeSolver> Visualizer<S> {
         Ok(Self { engine, simulator })
     }
 
-    pub fn from_particle_creator<Pc: ParticleCreator>(
-        mut particle_creator: Pc,
-        num_particles: u32,
-        epsilon: f32,
-        theta: f32,
-        width: u32,
-        height: u32,
-    ) -> color_eyre::Result<Self> {
-        let particles = particle_creator.create_particles(num_particles);
-        let bh = BarnesHut::new(&particles, theta);
-        let sim = Simulation::new(bh, particles, epsilon,);
-
-        Self::new(sim, width, height)
-    }
-
     pub fn multithreaded(mut self, num_threads: usize) -> Self {
         self.simulator = self.simulator.multithreaded(num_threads);
         self
@@ -59,11 +44,6 @@ impl<S: ShortRangeSolver> Visualizer<S> {
 
     pub fn rayon(mut self) -> Self {
         self.simulator = self.simulator.rayon_iter();
-        self
-    }
-
-    pub fn simd(mut self) -> Self {
-        self.simulator = self.simulator.simd();
         self
     }
 
@@ -79,8 +59,6 @@ impl<S: ShortRangeSolver> Visualizer<S> {
 
         let mut time = Instant::now();
         let mut current_step = Step::First;
-
-        dbg!(&self.simulator);
 
         self.engine.update_loop(move |_, _, objects, _, _, _| {
             let step = time.elapsed().as_secs_f32() * speed;
@@ -100,5 +78,21 @@ impl<S: ShortRangeSolver> Visualizer<S> {
         })?;
 
         Ok(())
+    }
+}
+
+impl<S: 'static + ShortRangeSolver> Visualizer<S> {
+    pub fn from_particle_creator<Pc: ParticleCreator>(
+        mut particle_creator: Pc,
+        short_range_solver: S,
+        num_particles: u32,
+        epsilon: f32,
+        width: u32,
+        height: u32,
+    ) -> color_eyre::Result<Self> {
+        let particles = particle_creator.create_particles(num_particles);
+        let sim = Simulation::new(particles, short_range_solver, epsilon);
+
+        Self::new(sim, width, height)
     }
 }

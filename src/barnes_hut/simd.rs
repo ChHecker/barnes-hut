@@ -6,55 +6,38 @@ use rayon::prelude::*;
 use simba::simd::{WideBoolF32x8, WideF32x8};
 
 use super::*;
-use crate::{gravity, Execution};
+use crate::{gravity, Execution, ShortRangeSolver};
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct BarnesHutSimd {
-    root: SimdNode,
     theta: f32,
 }
 
 impl BarnesHutSimd {
-    pub fn new(particles: &Particles, theta: f32) -> Self {
-        Self {
-            root: SimdNode::from_particles(particles),
-            theta,
-        }
+    pub fn new(theta: f32) -> Self {
+        Self { theta }
     }
+}
 
-    pub fn from_indices(particles: &Particles, indices: &[usize], theta: f32) -> Self {
-        Self {
-            root: SimdNode::from_indices(particles, indices),
-            theta,
-        }
-    }
-
-    pub fn calculate_acceleration(
+impl ShortRangeSolver for BarnesHutSimd {
+    fn calculate_accelerations(
         &self,
-        particles: &Particles,
-        particle: usize,
-        epsilon: f32,
-    ) -> Vector3<f32> {
-        self.root
-            .calculate_acceleration(particles, particle, epsilon, self.theta)
-    }
-
-    pub fn calculate_accelerations(
         particles: &Particles,
         accelerations: &mut [Vector3<f32>],
         epsilon: f32,
-        theta: f32,
         execution: Execution,
         sort: bool,
     ) -> Option<Vec<usize>> {
         match execution {
             Execution::SingleThreaded => {
-                let octree = Self::new(particles, theta);
+                let octree = SimdNode::from_particles(particles);
                 accelerations.iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon);
+                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta);
                 });
                 if sort {
-                    Some(octree.sorted_indices())
+                    let mut sorted_indices = Vec::new();
+                    octree.depth_first_search(&mut sorted_indices);
+                    Some(sorted_indices)
                 } else {
                     None
                 }
@@ -72,15 +55,18 @@ impl BarnesHutSimd {
                         let local_particles = &local_particles[i];
 
                         s.spawn(move || {
-                            let octree = Self::from_indices(particles, local_particles, theta);
+                            let octree = SimdNode::from_indices(particles, local_particles);
 
                             let acc: Vec<_> = (0..particles.len())
-                                .map(|p| octree.calculate_acceleration(particles, p, epsilon))
+                                .map(|p| {
+                                    octree.calculate_acceleration(particles, p, epsilon, self.theta)
+                                })
                                 .collect();
                             tx_acc.send(acc).unwrap();
 
                             if sort {
-                                let sorted_indices = octree.sorted_indices();
+                                let mut sorted_indices = Vec::new();
+                                octree.depth_first_search(&mut sorted_indices);
                                 tx_sort.send(sorted_indices).unwrap();
                             }
                         });
@@ -109,12 +95,14 @@ impl BarnesHutSimd {
             }
             #[cfg(feature = "rayon")]
             Execution::RayonIter => {
-                let octree = Self::new(particles, theta);
+                let octree = SimdNode::from_particles(particles);
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon);
+                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta);
                 });
                 if sort {
-                    Some(octree.sorted_indices())
+                    let mut sorted_indices = Vec::new();
+                    octree.depth_first_search(&mut sorted_indices);
+                    Some(sorted_indices)
                 } else {
                     None
                 }
@@ -126,16 +114,17 @@ impl BarnesHutSimd {
                     ScalarNode::divide_particles_to_threads(particles, num_threads);
 
                 let res = rayon::broadcast(|ctx| {
-                    let octree =
-                        Self::from_indices(particles, &local_particles[ctx.index()], theta);
+                    let octree = SimdNode::from_indices(particles, &local_particles[ctx.index()]);
 
                     let sorted_indices = if sort {
-                        Some(octree.sorted_indices())
+                        let mut sorted_indices = Vec::new();
+                        octree.depth_first_search(&mut sorted_indices);
+                        Some(sorted_indices)
                     } else {
                         None
                     };
                     let accelerations = (0..particles.len())
-                        .map(|p| octree.calculate_acceleration(particles, p, epsilon))
+                        .map(|p| octree.calculate_acceleration(particles, p, epsilon, self.theta))
                         .collect::<Vec<_>>();
 
                     (accelerations, sorted_indices)
@@ -149,8 +138,8 @@ impl BarnesHutSimd {
 
                 if sort {
                     let mut sorted_indices = Vec::new();
-                    for (_, indices_loc) in res {
-                        sorted_indices.append(&mut indices_loc.unwrap());
+                    for (_, mut indices_loc) in res {
+                        if let Some(indices_loc) = &mut indices_loc { sorted_indices.append(indices_loc) };
                     }
                     Some(sorted_indices) // TODO: more efficient
                 } else {
@@ -158,12 +147,6 @@ impl BarnesHutSimd {
                 }
             }
         }
-    }
-
-    pub fn sorted_indices(&self) -> Vec<usize> {
-        let mut indices = Vec::new();
-        self.root.depth_first_search(&mut indices);
-        indices
     }
 }
 
@@ -446,7 +429,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
 
     use super::*;
-    use crate::{generate_random_particles, Simulation, Step};
+    use crate::{Simulation, Step, direct_summation::DirectSummation, generate_random_particles};
 
     #[test]
     fn symmetry() {
@@ -456,10 +439,10 @@ mod tests {
         let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
 
-        BarnesHutSimd::calculate_accelerations(
+        let bh = BarnesHutSimd::new(0.);
+        bh.calculate_accelerations(
             &particles,
             &mut accs,
-            0.,
             0.,
             Execution::SingleThreaded,
             false,
@@ -472,8 +455,11 @@ mod tests {
     fn brute_force() {
         let particles = generate_random_particles(50);
 
-        let mut bf = Simulation::brute_force(particles.clone(), 0.);
-        let mut bh = Simulation::new(particles, 0., 0.).simd();
+        let ds = DirectSummation;
+        let mut bf = Simulation::new(particles.clone(), ds, 0.);
+
+        let bh = BarnesHutSimd::new(0.);
+        let mut bh = Simulation::new(particles, bh, 0.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bf.step(&mut acc_single, 1., Step::Middle);
@@ -489,8 +475,9 @@ mod tests {
     fn multithreaded() {
         let particles = generate_random_particles(50);
 
-        let mut bh_single = Simulation::new(particles.clone(), 0., 0.).simd();
-        let mut bh_multi = Simulation::new(particles, 0., 0.).simd().multithreaded(2);
+        let bh = BarnesHutSimd::new(0.);
+        let mut bh_single = Simulation::new(particles.clone(), bh, 0.);
+        let mut bh_multi = Simulation::new(particles, bh, 0.).multithreaded(2);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -506,8 +493,9 @@ mod tests {
     fn rayon() {
         let particles = generate_random_particles(50);
 
-        let mut bh_single = Simulation::new(particles.clone(), 0., 0.).simd();
-        let mut bh_rayon = Simulation::new(particles, 0., 0.).simd().rayon_iter();
+        let bh = BarnesHutSimd::new(0.);
+        let mut bh_single = Simulation::new(particles.clone(), bh, 0.);
+        let mut bh_rayon = Simulation::new(particles, bh, 0.).rayon_iter();
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);

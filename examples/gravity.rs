@@ -1,4 +1,4 @@
-use barnes_hut::{Particles, Simulation, Sorting, Step};
+use barnes_hut::{barnes_hut::BarnesHutSimd, Particles, Simulation, Sorting, Step};
 use nalgebra::Vector3;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -15,7 +15,9 @@ fn main() {
             )
         })
         .collect::<Particles>();
-    let mut bh = Simulation::new(particles, 1e-5, 1.5).simd().sorting(1);
+
+    let bh = BarnesHutSimd::new(1.5);
+    let mut bh = Simulation::new(particles, bh, 1e-5).sorting(1);
     // .multithreaded(4);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];
