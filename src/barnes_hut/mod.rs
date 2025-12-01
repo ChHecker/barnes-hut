@@ -172,22 +172,3 @@ where
 
     fn depth_first_search(&self, indices: &mut Vec<usize>);
 }
-
-pub fn sort_particles(particles: &mut Particles, indices: &mut [usize]) {
-    for idx in 0..particles.len() {
-        if indices[idx] != idx {
-            let mut current_idx = idx;
-            loop {
-                let target_idx = indices[current_idx];
-                indices[current_idx] = current_idx;
-                if indices[target_idx] == target_idx {
-                    break;
-                }
-                particles.masses.swap(current_idx, target_idx);
-                particles.positions.swap(current_idx, target_idx);
-                particles.velocities.swap(current_idx, target_idx);
-                current_idx = target_idx;
-            }
-        }
-    }
-}

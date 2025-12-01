@@ -1,7 +1,7 @@
 pub mod barnes_hut;
-pub mod brute_force;
+pub mod direct_summation;
 pub mod gravity;
-pub mod particle_creator;
+pub mod particles;
 #[cfg(feature = "simd")]
 pub mod simd;
 #[cfg(feature = "visualization")]
@@ -10,69 +10,12 @@ pub mod visualization;
 #[cfg(test)]
 mod csv;
 
-use barnes_hut::{sort_particles, BarnesHut}; //sorting::sort_particles,
+use barnes_hut::BarnesHut;
 use nalgebra::{DMatrix, Vector3};
+use particles::Particles;
 
 #[cfg(feature = "simd")]
 use barnes_hut::BarnesHutSimd;
-
-/// A collection of particles.
-///
-/// This struct is used to utilize the Struct-of-Arrays (SOA) architecture.
-#[derive(Clone, Debug)]
-pub struct Particles {
-    masses: Vec<f32>,
-    positions: Vec<Vector3<f32>>,
-    velocities: Vec<Vector3<f32>>,
-}
-
-impl Particles {
-    pub fn new(
-        masses: Vec<f32>,
-        positions: Vec<Vector3<f32>>,
-        velocities: Vec<Vector3<f32>>,
-    ) -> Self {
-        let n = masses.len();
-        assert_eq!(n, positions.len());
-        assert_eq!(n, velocities.len());
-
-        Self {
-            masses,
-            positions,
-            velocities,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.masses.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.masses.is_empty()
-    }
-}
-
-impl FromIterator<(f32, Vector3<f32>, Vector3<f32>)> for Particles {
-    fn from_iter<T: IntoIterator<Item = (f32, Vector3<f32>, Vector3<f32>)>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let cap = iter.size_hint().0;
-        let mut masses = Vec::with_capacity(cap);
-        let mut positions = Vec::with_capacity(cap);
-        let mut velocities = Vec::with_capacity(cap);
-
-        for (m, p, v) in iter {
-            masses.push(m);
-            positions.push(p);
-            velocities.push(v);
-        }
-
-        Self {
-            masses,
-            positions,
-            velocities,
-        }
-    }
-}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Execution {
@@ -92,19 +35,7 @@ pub enum Sorting {
     EveryNIteration(usize),
 }
 
-/// All possible algorithms offered in this crate.
-#[derive(Copy, Clone, Debug)]
-pub enum Simulator {
-    /// Direct O(n^2) force summation.
-    BruteForce,
-    /// Classical Barnes-Hut using monopoles.
-    BarnesHut { theta: f32 },
-    /// Barnes-Hut using SIMD.
-    #[cfg(feature = "simd")]
-    BarnesHutSimd { theta: f32 },
-}
-
-impl Simulator {
+pub trait ShortRangeSolver {
     fn calculate_accelerations(
         &self,
         particles: &Particles,
@@ -112,31 +43,7 @@ impl Simulator {
         epsilon: f32,
         execution: Execution,
         sort: bool,
-    ) -> Option<Vec<usize>> {
-        match self {
-            Simulator::BruteForce => {
-                brute_force::calculate_accelerations(particles, accelerations, epsilon, execution);
-                None
-            }
-            Simulator::BarnesHut { theta } => BarnesHut::calculate_accelerations(
-                particles,
-                accelerations,
-                epsilon,
-                *theta,
-                execution,
-                sort,
-            ),
-            #[cfg(feature = "simd")]
-            Simulator::BarnesHutSimd { theta } => BarnesHutSimd::calculate_accelerations(
-                particles,
-                accelerations,
-                epsilon,
-                *theta,
-                execution,
-                sort,
-            ),
-        }
-    }
+    ) -> Option<Vec<usize>>;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -155,7 +62,7 @@ impl Step {
             Step::Last
         } else {
             if let Sorting::EveryNIteration(n) = sorting {
-                if index % n == 0 {
+                if index.is_multiple_of(n) {
                     return Step::Sort;
                 }
             }
@@ -187,31 +94,20 @@ impl Step {
 /// );
 /// ```
 #[derive(Clone, Debug)]
-pub struct Simulation {
+pub struct Simulation<S: ShortRangeSolver> {
     particles: Particles,
+    short_range_solver: S,
     execution: Execution,
-    simulator: Simulator,
     sorting: Sorting,
     epsilon: f32,
 }
 
-impl Simulation {
-    pub fn new(particles: Particles, epsilon: f32, theta: f32) -> Self {
+impl<S: ShortRangeSolver> Simulation<S> {
+    pub fn new(short_range_solver: S, particles: Particles, epsilon: f32) -> Self {
         Self {
             particles,
+            short_range_solver,
             execution: Execution::SingleThreaded,
-            simulator: Simulator::BarnesHut { theta },
-            sorting: Sorting::None,
-            epsilon,
-        }
-    }
-
-    /// Use brute force calculation of the force.
-    pub fn brute_force(particles: Particles, epsilon: f32) -> Self {
-        Self {
-            particles,
-            execution: Execution::SingleThreaded,
-            simulator: Simulator::BruteForce,
             sorting: Sorting::None,
             epsilon,
         }
@@ -245,22 +141,6 @@ impl Simulation {
         self
     }
 
-    /// Store four particles per leaf and calculate the forces of all of them at once.
-    ///
-    /// This requires hardware support of four-wide double vectors.
-    /// The results in my testing were mixed, so this might or might not make it faster.
-    /// **Warning:** Not compatible with brute force!
-    #[cfg(feature = "simd")]
-    pub fn simd(mut self) -> Self {
-        let theta = match self.simulator {
-            Simulator::BruteForce => panic!("called simd on brute force simulation"),
-            Simulator::BarnesHut { theta } => theta,
-            Simulator::BarnesHutSimd { theta } => theta,
-        };
-        self.simulator = Simulator::BarnesHutSimd { theta };
-        self
-    }
-
     /// How frequently to sort the particles.
     pub fn sorting(mut self, every_n_iterations: usize) -> Self {
         if every_n_iterations != 0 {
@@ -290,11 +170,11 @@ impl Simulation {
     /// - `accelerations`: The slice to store the accelerations in. Used to avoid allocations.
     /// - `time_step`: Size of each time step.
     /// - `current_step`: Whether the step is the first, last, or in between; or sorting is desired.
-    ///     Used to do an Euler step in the beginning and end.
+    ///   Used to do an Euler step in the beginning and end.
     pub fn step(&mut self, accelerations: &mut [Vector3<f32>], time_step: f32, current_step: Step) {
         let sort = matches!(current_step, Step::Sort);
 
-        let sorted_indices = self.simulator.calculate_accelerations(
+        let sorted_indices = self.short_range_solver.calculate_accelerations(
             &self.particles,
             accelerations,
             self.epsilon,
@@ -303,7 +183,7 @@ impl Simulation {
         );
 
         if let Some(mut sorted_indices) = sorted_indices {
-            sort_particles(&mut self.particles, &mut sorted_indices);
+            self.particles.sort(&mut sorted_indices);
         }
 
         /*

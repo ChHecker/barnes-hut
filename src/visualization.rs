@@ -1,24 +1,24 @@
 use std::time::Instant;
 
-use crate::{particle_creator::ParticleCreator, Simulation, Step};
+use crate::{ShortRangeSolver, Simulation, Step, barnes_hut::BarnesHut, particles::creator::ParticleCreator};
 #[cfg(feature = "simd")]
 use blue_engine::{primitive_shapes::uv_sphere, Engine, WindowDescriptor};
 use nalgebra::Vector3;
 
 /// Visualize the Barnes-Hut algorithm.
-pub struct Visualizer {
+pub struct Visualizer<S: ShortRangeSolver> {
     engine: Engine,
-    simulator: Simulation,
+    simulator: Simulation<S>,
 }
 
-impl Visualizer {
+impl<S: ShortRangeSolver> Visualizer<S> {
     /// Create a new visualizer.
     ///
     /// # Arguments
     /// - `simulator`: A [`Simulation`] struct.
     /// - `width`: Width of the window.
     /// - `height`: Height of the window.
-    pub fn new(simulator: Simulation, width: u32, height: u32) -> color_eyre::Result<Self> {
+    pub fn new(simulator: Simulation<S>, width: u32, height: u32) -> color_eyre::Result<Self> {
         let mut engine = Engine::new_config(WindowDescriptor {
             width,
             height,
@@ -46,9 +46,10 @@ impl Visualizer {
         height: u32,
     ) -> color_eyre::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
-        let barnes_hut = Simulation::new(particles, epsilon, theta);
+        let bh = BarnesHut::new(&particles, theta);
+        let sim = Simulation::new(bh, particles, epsilon,);
 
-        Self::new(barnes_hut, width, height)
+        Self::new(sim, width, height)
     }
 
     pub fn multithreaded(mut self, num_threads: usize) -> Self {

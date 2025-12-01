@@ -1,4 +1,6 @@
-use nalgebra::{SimdComplexField, SimdValue, Vector3};
+use nalgebra::Vector3;
+#[cfg(feature = "simd")]
+use nalgebra::{SimdComplexField, SimdValue};
 #[cfg(feature = "simd")]
 use simba::simd::WideF32x8;
 

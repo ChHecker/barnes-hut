@@ -3,7 +3,7 @@ use std::{sync::mpsc, thread};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::{gravity, Execution};
+use crate::{Execution, ShortRangeSolver, gravity};
 
 use super::*;
 
@@ -169,6 +169,19 @@ impl BarnesHut {
         let mut indices = Vec::new();
         self.root.depth_first_search(&mut indices);
         indices
+    }
+}
+
+impl ShortRangeSolver for BarnesHut {
+    fn calculate_accelerations(
+        &self,
+        particles: &Particles,
+        accelerations: &mut [Vector3<f32>],
+        epsilon: f32,
+        execution: Execution,
+        sort: bool,
+    ) -> Option<Vec<usize>> {
+        todo!()
     }
 }
 
