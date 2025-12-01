@@ -176,7 +176,7 @@ fn sorting(c: &mut Criterion) {
         .collect::<Particles>();
 
     let mut group = c.benchmark_group("barnes hut sorting");
-    for n in [1, 10, 100, 1000] {
+    for n in [1, 10, 100] {
         group.bench_with_input(BenchmarkId::new("simd", n), &n, |b, &n| {
             b.iter_batched_ref(
                 || {
