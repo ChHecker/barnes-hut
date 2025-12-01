@@ -52,6 +52,7 @@ pub enum Step {
 }
 
 impl Step {
+    #[must_use]
     pub fn from_index(index: usize, num_steps: usize, sorting: Sorting) -> Self {
         if index == 0 {
             Step::First
@@ -116,6 +117,7 @@ impl<S: ShortRangeSolver> Simulation<S> {
     ///
     /// Every thread gets its own tree with a part of the particles
     /// and calculates for all particles the forces from its own tree.
+    #[must_use]
     pub fn multithreaded(mut self, num_threads: usize) -> Self {
         self.execution = Execution::Multithreaded { num_threads };
         self
@@ -125,6 +127,7 @@ impl<S: ShortRangeSolver> Simulation<S> {
     ///
     /// All threads calculate the forces from the shared tree, splitting the particles.
     #[cfg(feature = "rayon")]
+    #[must_use]
     pub fn rayon_iter(mut self) -> Self {
         self.execution = Execution::RayonIter;
         self
@@ -135,12 +138,14 @@ impl<S: ShortRangeSolver> Simulation<S> {
     /// Every thread gets its own tree with a part of the particles
     /// and calculates for all particles the forces from its own tree.
     #[cfg(feature = "rayon")]
+    #[must_use]
     pub fn rayon_pool(mut self) -> Self {
         self.execution = Execution::RayonPool;
         self
     }
 
     /// How frequently to sort the particles.
+    #[must_use]
     pub fn sorting(mut self, every_n_iterations: usize) -> Self {
         if every_n_iterations != 0 {
             self.sorting = Sorting::EveryNIteration(every_n_iterations);
@@ -149,16 +154,19 @@ impl<S: ShortRangeSolver> Simulation<S> {
     }
 
     /// Get an immutable reference to the particles' masses.
+    #[must_use]
     pub fn masses(&self) -> &[f32] {
         &self.particles.masses
     }
 
     /// Get an immutable reference to the particles' positions.
+    #[must_use]
     pub fn positions(&self) -> &[Vector3<f32>] {
         &self.particles.positions
     }
 
     /// Get an immutable reference to the particles' velocities.
+    #[must_use]
     pub fn velocities(&self) -> &[Vector3<f32>] {
         &self.particles.velocities
     }

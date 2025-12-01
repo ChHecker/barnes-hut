@@ -4,8 +4,9 @@ use nalgebra::{SimdComplexField, SimdValue};
 #[cfg(feature = "simd")]
 use simba::simd::WideF32x8;
 
-pub const G: f32 = 6.6743015e-11;
+pub const G: f32 = 6.674_301_5e-11;
 
+#[must_use]
 pub fn acceleration(
     position1: Vector3<f32>,
     mass2: f32,
@@ -18,6 +19,7 @@ pub fn acceleration(
 }
 
 #[cfg(feature = "simd")]
+#[must_use]
 pub fn acceleration_simd(
     position1: Vector3<f32>,
     mass2: WideF32x8,

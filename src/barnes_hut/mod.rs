@@ -31,6 +31,7 @@ pub struct PointMass {
 }
 
 impl PointMass {
+    #[must_use]
     pub fn new(mass: f32, position: Vector3<f32>) -> Self {
         Self { mass, position }
     }

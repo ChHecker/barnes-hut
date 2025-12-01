@@ -3,9 +3,8 @@ use std::{sync::mpsc, thread};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
+use super::{Node, Particles, PointMass, Subnodes, Vector3};
 use crate::{gravity, Execution, ShortRangeSolver};
-
-use super::*;
 
 #[derive(Clone, Debug)]
 pub(super) enum OptionalMass {
@@ -19,6 +18,7 @@ pub struct BarnesHut {
 }
 
 impl BarnesHut {
+    #[must_use]
     pub fn new(theta: f32) -> Self {
         Self { theta }
     }
@@ -135,7 +135,7 @@ impl ShortRangeSolver for BarnesHut {
                     (accelerations, sorted_indices)
                 });
 
-                for (acc, _) in res.iter() {
+                for (acc, _) in &res {
                     for (i, a) in acc.iter().enumerate() {
                         accelerations[i] += a;
                     }
@@ -144,7 +144,9 @@ impl ShortRangeSolver for BarnesHut {
                 if sort {
                     let mut sorted_indices = Vec::new();
                     for (_, mut indices_loc) in res {
-                        if let Some(indices_loc) = &mut indices_loc { sorted_indices.append(indices_loc) };
+                        if let Some(indices_loc) = &mut indices_loc {
+                            sorted_indices.append(indices_loc);
+                        }
                     }
                     Some(sorted_indices) // TODO: more efficient
                 } else {
@@ -230,7 +232,7 @@ impl super::Node for ScalarNode {
                             Self::center_from_subnode(self.width, self.center, new_subnode),
                             self.width / 2.,
                             particle,
-                        ))
+                        ));
                     }
                 }
 
@@ -348,7 +350,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
 
     use super::*;
-    use crate::{Simulation, Step, direct_summation::DirectSummation, generate_random_particles};
+    use crate::{direct_summation::DirectSummation, generate_random_particles, Simulation, Step};
 
     #[test]
     fn symmetry() {
@@ -359,13 +361,7 @@ mod tests {
         let mut accs = vec![Vector3::zeros(); 2];
 
         let bh = BarnesHut::new(0.);
-        bh.calculate_accelerations(
-            &particles,
-            &mut accs,
-            0.,
-            Execution::SingleThreaded,
-            false,
-        );
+        bh.calculate_accelerations(&particles, &mut accs, 0., Execution::SingleThreaded, false);
 
         assert_abs_diff_eq!(accs[0], -accs[1]);
     }

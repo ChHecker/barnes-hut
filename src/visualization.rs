@@ -37,11 +37,13 @@ impl<S: 'static + ShortRangeSolver> Visualizer<S> {
         Ok(Self { engine, simulator })
     }
 
+    #[must_use]
     pub fn multithreaded(mut self, num_threads: usize) -> Self {
         self.simulator = self.simulator.multithreaded(num_threads);
         self
     }
 
+    #[must_use]
     pub fn rayon(mut self) -> Self {
         self.simulator = self.simulator.rayon_iter();
         self

@@ -5,8 +5,8 @@ use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
 use rayon::prelude::*;
 use simba::simd::{WideBoolF32x8, WideF32x8};
 
-use super::*;
 use crate::{gravity, Execution, ShortRangeSolver};
+use super::{Particles, Vector3, Node, ScalarNode, PointMass, Subnodes};
 
 #[derive(Clone, Copy, Debug)]
 pub struct BarnesHutSimd {
@@ -14,6 +14,7 @@ pub struct BarnesHutSimd {
 }
 
 impl BarnesHutSimd {
+    #[must_use]
     pub fn new(theta: f32) -> Self {
         Self { theta }
     }
@@ -139,7 +140,9 @@ impl ShortRangeSolver for BarnesHutSimd {
                 if sort {
                     let mut sorted_indices = Vec::new();
                     for (_, mut indices_loc) in res {
-                        if let Some(indices_loc) = &mut indices_loc { sorted_indices.append(indices_loc) };
+                        if let Some(indices_loc) = &mut indices_loc {
+                            sorted_indices.append(indices_loc);
+                        }
                     }
                     Some(sorted_indices) // TODO: more efficient
                 } else {
@@ -298,7 +301,7 @@ impl super::Node for SimdNode {
                             Self::center_from_subnode(self.width, self.center, new_subnode),
                             self.width / 2.,
                             particle,
-                        ))
+                        ));
                     }
                 }
 
@@ -375,9 +378,9 @@ impl super::Node for SimdNode {
                     }
                 }
             }
-            OptionalMass::Particle(particle2) => {
-                let masses = particle2.masses(particles);
-                let positions = particle2.positions(particles);
+            OptionalMass::Particle(particle_other) => {
+                let masses = particle_other.masses(particles);
+                let positions = particle_other.positions(particles);
                 let same: WideBoolF32x8 = positions
                     .iter()
                     .zip(particles.positions[particle].iter())
@@ -396,7 +399,7 @@ impl super::Node for SimdNode {
                     epsilon,
                 )
                 .map(|elem| same.if_else(|| WideF32x8::splat(0.), || elem))
-                .map(|elem| elem.simd_horizontal_sum());
+                .map(WideF32x8::simd_horizontal_sum);
             }
         }
 
@@ -413,7 +416,7 @@ impl super::Node for SimdNode {
             None => match self.pseudoparticle {
                 OptionalMass::Particle(arr) => {
                     for &particle in arr.iter() {
-                        indices.push(particle)
+                        indices.push(particle);
                     }
                 }
                 OptionalMass::Point(_) => {
@@ -429,7 +432,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
 
     use super::*;
-    use crate::{Simulation, Step, direct_summation::DirectSummation, generate_random_particles};
+    use crate::{direct_summation::DirectSummation, generate_random_particles, Simulation, Step};
 
     #[test]
     fn symmetry() {
@@ -440,13 +443,7 @@ mod tests {
         let mut accs = vec![Vector3::zeros(); 2];
 
         let bh = BarnesHutSimd::new(0.);
-        bh.calculate_accelerations(
-            &particles,
-            &mut accs,
-            0.,
-            Execution::SingleThreaded,
-            false,
-        );
+        bh.calculate_accelerations(&particles, &mut accs, 0., Execution::SingleThreaded, false);
 
         assert_abs_diff_eq!(accs[0], -accs[1]);
     }

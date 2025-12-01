@@ -14,6 +14,8 @@ use crate::Particles;
 
 #[cfg(feature = "randomization")]
 mod random {
+    #![allow(clippy::wildcard_imports)]
+
     use std::f32::consts::PI;
 
     use nalgebra::Vector3;

@@ -14,6 +14,7 @@ pub struct Particles {
 }
 
 impl Particles {
+    #[must_use]
     pub fn new(
         masses: Vec<f32>,
         positions: Vec<Vector3<f32>>,
@@ -30,10 +31,12 @@ impl Particles {
         }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.masses.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.masses.is_empty()
     }
