@@ -22,17 +22,20 @@ mod simd;
 #[cfg(feature = "simd")]
 pub use simd::*;
 
-use crate::Particles;
+use crate::{
+    Particles,
+    particles::{PosConverter, PosStorage},
+};
 
 #[derive(Clone, Debug)]
 pub struct PointMass {
     pub mass: f32,
-    pub position: Vector3<f32>,
+    pub position: Vector3<PosStorage>,
 }
 
 impl PointMass {
     #[must_use]
-    pub fn new(mass: f32, position: Vector3<f32>) -> Self {
+    pub fn new(mass: f32, position: Vector3<PosStorage>) -> Self {
         Self { mass, position }
     }
 }
@@ -43,40 +46,42 @@ trait Node
 where
     Self: Sized,
 {
-    fn new(center: Vector3<f32>, width: f32, index: usize) -> Self;
+    fn new(center: Vector3<PosStorage>, width: PosStorage, index: usize) -> Self;
 
-    fn from_particles(particles: &Particles) -> Self {
+    fn from_particles(particles: &Particles, conv: &PosConverter) -> Self {
         let (center, width) = Self::get_center_and_width(&particles.positions);
 
         let mut node = Self::new(center, width, 0);
 
         for i in 1..particles.len() {
-            node.insert_particle(particles, i);
+            node.insert_particle(particles, i, conv);
         }
 
-        node.calculate_mass(particles);
+        node.calculate_mass(particles, conv);
 
         node
     }
 
-    fn from_indices(particles: &Particles, indices: &[usize]) -> Self {
+    fn from_indices(particles: &Particles, indices: &[usize], conv: &PosConverter) -> Self {
         let (center, width) = Self::get_center_and_width(&particles.positions);
 
         let mut iter = indices.iter();
         let mut node = Self::new(center, width, *iter.next().unwrap());
 
         for &i in iter {
-            node.insert_particle(particles, i);
+            node.insert_particle(particles, i, conv);
         }
 
-        node.calculate_mass(particles);
+        node.calculate_mass(particles, conv);
 
         node
     }
 
-    fn get_center_and_width(positions: &[Vector3<f32>]) -> (Vector3<f32>, f32) {
-        let mut v_min = Vector3::zeros();
-        let mut v_max = Vector3::zeros();
+    fn get_center_and_width(
+        positions: &[Vector3<PosStorage>],
+    ) -> (Vector3<PosStorage>, PosStorage) {
+        let mut v_min = Vector3::from_element(PosStorage(u32::MAX));
+        let mut v_max = Vector3::from_element(PosStorage(u32::MIN));
         for pos in positions {
             for (i, elem) in pos.iter().enumerate() {
                 if *elem > v_max[i] {
@@ -87,15 +92,36 @@ where
                 }
             }
         }
+
+        dbg!(v_min);
+        dbg!(v_max);
+
+        for v in &mut v_min {
+            if *v < PosStorage(u32::MAX / 10) {
+                *v = PosStorage(0);
+            }
+        }
+        for v in &mut v_max {
+            if *v > PosStorage(9 * (u32::MAX / 10)) {
+                *v = PosStorage(u32::MAX);
+            }
+        }
+
+        dbg!(v_min);
+        dbg!(v_max);
+
         let width = (v_max - v_min).max();
-        let center = v_min + v_max / 2.;
+        let center = v_min + (v_max - v_min) / PosStorage(2);
+
+        dbg!(width);
+        dbg!(center);
 
         (center, width)
     }
 
-    fn insert_particle(&mut self, particles: &Particles, index: usize);
+    fn insert_particle(&mut self, particles: &Particles, index: usize, conv: &PosConverter);
 
-    fn calculate_mass(&mut self, particles: &Particles);
+    fn calculate_mass(&mut self, particles: &Particles, conv: &PosConverter);
 
     fn calculate_acceleration(
         &self,
@@ -103,9 +129,10 @@ where
         particle: usize,
         epsilon: f32,
         theta: f32,
+        conv: &PosConverter,
     ) -> Vector3<f32>;
 
-    fn choose_subnode(center: &Vector3<f32>, position: &Vector3<f32>) -> usize {
+    fn choose_subnode(center: &Vector3<PosStorage>, position: &Vector3<PosStorage>) -> usize {
         if position.x > center.x {
             if position.y > center.y {
                 if position.z > center.z {
@@ -130,30 +157,31 @@ where
         6
     }
 
-    fn center_from_subnode(width: f32, center: Vector3<f32>, i: usize) -> Vector3<f32> {
-        let step_size = width / 2.;
-        if i == 0 {
-            return center + Vector3::new(step_size, step_size, step_size);
+    fn center_from_subnode(
+        width: PosStorage,
+        center: Vector3<PosStorage>,
+        i: usize,
+    ) -> Vector3<PosStorage> {
+        let step_size = width / PosStorage(2);
+        let zero = Vector3::zeros();
+        let mut x = zero;
+        x.x = step_size;
+        let mut y = zero;
+        y.y = step_size;
+        let mut z = zero;
+        z.z = step_size;
+
+        match i {
+            0 => center + x + y + z,
+            1 => center - x + y + z,
+            2 => center - x - y + z,
+            3 => center + x - y + z,
+            4 => center + x + y - z,
+            5 => center - x + y - z,
+            6 => center - x - y - z,
+            7 => center + x - y - z,
+            _ => unreachable_debug!("subnode index out of range"),
         }
-        if i == 1 {
-            return center + Vector3::new(-step_size, step_size, step_size);
-        }
-        if i == 2 {
-            return center + Vector3::new(-step_size, -step_size, step_size);
-        }
-        if i == 3 {
-            return center + Vector3::new(step_size, -step_size, step_size);
-        }
-        if i == 4 {
-            return center + Vector3::new(step_size, step_size, -step_size);
-        }
-        if i == 5 {
-            return center + Vector3::new(-step_size, step_size, -step_size);
-        }
-        if i == 6 {
-            return center + Vector3::new(-step_size, -step_size, -step_size);
-        }
-        center + Vector3::new(step_size, -step_size, -step_size)
     }
 
     fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec<Vec<usize>> {

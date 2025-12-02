@@ -40,6 +40,7 @@ pub trait ShortRangeSolver {
         epsilon: f32,
         execution: Execution,
         sort: bool,
+        conv: &PosConverter
     ) -> Option<Vec<usize>>;
 }
 
@@ -59,11 +60,10 @@ impl Step {
         } else if index == num_steps - 1 {
             Step::Last
         } else {
-            if let Sorting::EveryNIteration(n) = sorting {
-                if index.is_multiple_of(n) {
+            if let Sorting::EveryNIteration(n) = sorting
+                && index.is_multiple_of(n) {
                     return Step::Sort;
                 }
-            }
             Step::Middle
         }
     }
@@ -81,13 +81,13 @@ impl Step {
 /// let particles: Particles = (0..1_000).map(|_| {
 ///         (
 ///             1e6,
-///             1000f32 * Vector3::new_random(),
+///             Vector3::new_random(),
 ///             Vector3::new_random(),
 ///         )
 ///     }).collect();
 ///
 /// let bh = BarnesHutSimd::new(1.5);
-/// let mut sim = Simulation::new(particles, bh, 1e-5).multithreaded(4);
+/// let mut sim = Simulation::new(particles, bh, 1e-5, 100.).multithreaded(4);
 /// sim.simulate(
 ///     0.1,
 ///     100
@@ -96,6 +96,7 @@ impl Step {
 #[derive(Clone, Debug)]
 pub struct Simulation<S: ShortRangeSolver> {
     particles: Particles,
+    pub conv: PosConverter,
     short_range_solver: S,
     execution: Execution,
     sorting: Sorting,
@@ -103,9 +104,11 @@ pub struct Simulation<S: ShortRangeSolver> {
 }
 
 impl<S: ShortRangeSolver> Simulation<S> {
-    pub fn new(particles: Particles, short_range_solver: S, epsilon: f32) -> Self {
+    pub fn new(particles: Particles, short_range_solver: S, epsilon: f32, box_size: f32) -> Self {
+        let conv = PosConverter::new(box_size);
         Self {
             particles,
+            conv,
             short_range_solver,
             execution: Execution::SingleThreaded,
             sorting: Sorting::None,
@@ -155,20 +158,23 @@ impl<S: ShortRangeSolver> Simulation<S> {
 
     /// Get an immutable reference to the particles' masses.
     #[must_use]
-    pub fn masses(&self) -> &[f32] {
-        &self.particles.masses
+    pub fn len_particles(&self) -> usize {
+        self.particles.len()
+    }
+
+    /// Get an immutable reference to the particles' masses.
+    pub fn masses(&self) -> impl Iterator<Item = &f32> {
+        self.particles.masses.iter()
     }
 
     /// Get an immutable reference to the particles' positions.
-    #[must_use]
-    pub fn positions(&self) -> &[Vector3<f32>] {
-        &self.particles.positions
+    pub fn positions(&self) -> impl Iterator<Item = &Vector3<PosStorage>> {
+        self.particles.positions.iter()
     }
 
     /// Get an immutable reference to the particles' velocities.
-    #[must_use]
-    pub fn velocities(&self) -> &[Vector3<f32>] {
-        &self.particles.velocities
+    pub fn velocities(&self) -> impl Iterator<Item = &Vector3<f32>> {
+        self.particles.velocities.iter()
     }
 
     /// Do a single simulation step.
@@ -187,6 +193,7 @@ impl<S: ShortRangeSolver> Simulation<S> {
             self.epsilon,
             self.execution,
             sort,
+            &self.conv
         );
 
         if let Some(mut sorted_indices) = sorted_indices {
@@ -198,13 +205,18 @@ impl<S: ShortRangeSolver> Simulation<S> {
          * v_(i + 1/2) = v_(i - 1/2) + a_i dt
          * x_(i + 1) = x_i + v_(i + 1/2) dt
          */
-        for ((pos, vel), acc) in self
+        for (((pos, vel), acc), ignore) in self
             .particles
             .positions
             .iter_mut()
             .zip(self.particles.velocities.iter_mut())
             .zip(accelerations.iter_mut())
+            .zip(self.particles.ignore.iter_mut())
         {
+            if *ignore {
+                continue;
+            }
+
             // in first time step, need to get from v_0 to v_(1/2)
             if let Step::First = current_step {
                 *vel += *acc * time_step / 2.;
@@ -212,7 +224,8 @@ impl<S: ShortRangeSolver> Simulation<S> {
                 *vel += *acc * time_step;
             }
 
-            *pos += *vel * time_step;
+            let summed = self.conv.add_float_to_pos(pos, *vel * time_step);
+            *ignore = !summed;
 
             // in last step, need to get from v_(n_steps - 1/2) to v_(n_steps)
             if let Step::Last = current_step {
@@ -229,13 +242,13 @@ impl<S: ShortRangeSolver> Simulation<S> {
     /// # Arguments
     /// - `time_step`: Size of each time step.
     /// - `num_steps`: How many time steps to take.
-    pub fn simulate(&mut self, time_step: f32, num_steps: usize) -> DMatrix<Vector3<f32>> {
+    pub fn simulate(&mut self, time_step: f32, num_steps: usize) -> DMatrix<Vector3<PosStorage>> {
         assert!(time_step > 0.);
         assert!(num_steps > 0);
 
         let n = self.particles.len();
 
-        let mut positions: DMatrix<Vector3<f32>> = DMatrix::zeros(num_steps + 1, n);
+        let mut positions: DMatrix<Vector3<PosStorage>> = DMatrix::zeros(num_steps + 1, n);
         for (i, pos) in positions.row_mut(0).iter_mut().enumerate() {
             *pos = self.particles.positions[i];
         }
@@ -264,6 +277,8 @@ impl<S: ShortRangeSolver> Simulation<S> {
 #[cfg(test)]
 pub(crate) use tests::generate_random_particles;
 
+use crate::particles::{PosConverter, PosStorage};
+
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -276,16 +291,16 @@ mod tests {
         (0..n)
             .map(|_| {
                 (
-                    rng.gen_range(0.0..1e9),
+                    rng.random_range(0.0..1e9),
                     Vector3::new(
-                        rng.gen_range(-10.0..10.0),
-                        rng.gen_range(-10.0..10.0),
-                        rng.gen_range(-10.0..10.0),
+                        PosStorage(rng.random_range(u32::MAX/4..3 * (u32::MAX / 4))),
+                        PosStorage(rng.random_range(u32::MAX/4..3 * (u32::MAX / 4))),
+                        PosStorage(rng.random_range(u32::MAX/4..3 * (u32::MAX / 4))),
                     ),
                     Vector3::new(
-                        rng.gen_range(-1.0..1.0),
-                        rng.gen_range(-1.0..1.0),
-                        rng.gen_range(-1.0..1.0),
+                        rng.random_range(-1.0..1.0),
+                        rng.random_range(-1.0..1.0),
+                        rng.random_range(-1.0..1.0),
                     ),
                 )
             })

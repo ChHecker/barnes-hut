@@ -3,10 +3,13 @@ use std::{ops::Deref, sync::mpsc, thread};
 use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
-use simba::simd::{WideBoolF32x8, WideF32x8};
 
-use crate::{gravity, Execution, ShortRangeSolver};
-use super::{Particles, Vector3, Node, ScalarNode, PointMass, Subnodes};
+use super::{Node, Particles, PointMass, ScalarNode, Subnodes, Vector3};
+use crate::{
+    Execution, ShortRangeSolver, gravity,
+    particles::{PosConverter, PosStorage, SimdPosStorage},
+    simd::{bf32x8, bu32x8, f32x8},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct BarnesHutSimd {
@@ -28,12 +31,13 @@ impl ShortRangeSolver for BarnesHutSimd {
         epsilon: f32,
         execution: Execution,
         sort: bool,
+        conv: &PosConverter,
     ) -> Option<Vec<usize>> {
         match execution {
             Execution::SingleThreaded => {
-                let octree = SimdNode::from_particles(particles);
+                let octree = SimdNode::from_particles(particles, conv);
                 accelerations.iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta);
+                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
                 });
                 if sort {
                     let mut sorted_indices = Vec::new();
@@ -56,11 +60,13 @@ impl ShortRangeSolver for BarnesHutSimd {
                         let local_particles = &local_particles[i];
 
                         s.spawn(move || {
-                            let octree = SimdNode::from_indices(particles, local_particles);
+                            let octree = SimdNode::from_indices(particles, local_particles, conv);
 
                             let acc: Vec<_> = (0..particles.len())
                                 .map(|p| {
-                                    octree.calculate_acceleration(particles, p, epsilon, self.theta)
+                                    octree.calculate_acceleration(
+                                        particles, p, epsilon, self.theta, conv,
+                                    )
                                 })
                                 .collect();
                             tx_acc.send(acc).unwrap();
@@ -96,9 +102,9 @@ impl ShortRangeSolver for BarnesHutSimd {
             }
             #[cfg(feature = "rayon")]
             Execution::RayonIter => {
-                let octree = SimdNode::from_particles(particles);
+                let octree = SimdNode::from_particles(particles, conv);
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta);
+                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
                 });
                 if sort {
                     let mut sorted_indices = Vec::new();
@@ -115,7 +121,8 @@ impl ShortRangeSolver for BarnesHutSimd {
                     ScalarNode::divide_particles_to_threads(particles, num_threads);
 
                 let res = rayon::broadcast(|ctx| {
-                    let octree = SimdNode::from_indices(particles, &local_particles[ctx.index()]);
+                    let octree =
+                        SimdNode::from_indices(particles, &local_particles[ctx.index()], conv);
 
                     let sorted_indices = if sort {
                         let mut sorted_indices = Vec::new();
@@ -125,7 +132,9 @@ impl ShortRangeSolver for BarnesHutSimd {
                         None
                     };
                     let accelerations = (0..particles.len())
-                        .map(|p| octree.calculate_acceleration(particles, p, epsilon, self.theta))
+                        .map(|p| {
+                            octree.calculate_acceleration(particles, p, epsilon, self.theta, conv)
+                        })
                         .collect::<Vec<_>>();
 
                     (accelerations, sorted_indices)
@@ -181,16 +190,26 @@ impl ParticleArray {
         true
     }
 
-    fn center_of_mass(&self, particles: &Particles) -> (f32, Vector3<f32>) {
+    fn center_of_mass(
+        &self,
+        particles: &Particles,
+        conv: &PosConverter,
+    ) -> (f32, Vector3<PosStorage>) {
         self.iter()
-            .map(|&par| (particles.masses[par], particles.velocities[par]))
+            .map(|&par| (particles.masses[par], particles.positions[par]))
             .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
                 let m_sum = m_acc + m;
-                (m_sum, (pos_acc * m_acc + pos * m) / m_sum)
+                (
+                    m_sum,
+                    conv.float_to_pos_vec(
+                        (conv.pos_to_float_vec(pos_acc) * m_acc + conv.pos_to_float_vec(pos) * m)
+                            / m_sum,
+                    ),
+                )
             })
     }
 
-    fn masses(&self, particles: &Particles) -> WideF32x8 {
+    fn masses(&self, particles: &Particles) -> f32x8 {
         let mut mass = [0.; 8];
         for (i, &par) in self.iter().enumerate() {
             mass[i] = particles.masses[par];
@@ -198,8 +217,8 @@ impl ParticleArray {
         mass.into()
     }
 
-    fn positions(&self, particles: &Particles) -> Vector3<WideF32x8> {
-        let mut position: Vector3<WideF32x8> = Vector3::zeros();
+    fn positions(&self, particles: &Particles) -> Vector3<SimdPosStorage> {
+        let mut position: Vector3<SimdPosStorage> = Vector3::zeros();
         for (i, &par) in self.iter().enumerate() {
             for (j, &pos) in particles.positions[par].iter().enumerate() {
                 position[j].replace(i, pos);
@@ -236,16 +255,21 @@ impl Clone for OptionalMass {
 struct SimdNode {
     subnodes: Option<Box<Subnodes<Self>>>,
     pseudoparticle: OptionalMass,
-    center: Vector3<f32>,
-    width: f32,
+    center: Vector3<PosStorage>,
+    width: PosStorage,
 }
 
 impl SimdNode {
-    fn insert_particle_subdivide(&mut self, particles: &Particles, new_particle: usize) {
-        if let OptionalMass::Particle(previous_particles) = &mut self.pseudoparticle {
-            if previous_particles.push(new_particle) {
-                return;
-            }
+    fn insert_particle_subdivide(
+        &mut self,
+        particles: &Particles,
+        new_particle: usize,
+        conv: &PosConverter,
+    ) {
+        if let OptionalMass::Particle(previous_particles) = &mut self.pseudoparticle
+            && previous_particles.push(new_particle)
+        {
+            return;
         }
 
         match &self.pseudoparticle {
@@ -256,7 +280,7 @@ impl SimdNode {
                     Self::choose_subnode(&self.center, &particles.positions[new_particle]);
                 let new_node = SimdNode::new(
                     Self::center_from_subnode(self.width, self.center, new_index),
-                    self.width / 2.,
+                    self.width / PosStorage(2),
                     new_particle,
                 );
                 // Insert new particle
@@ -265,10 +289,10 @@ impl SimdNode {
                 self.subnodes = Some(Box::new(new_nodes));
 
                 for &particle in previous_particles.clone().iter() {
-                    self.insert_particle(particles, particle);
+                    self.insert_particle(particles, particle, conv);
                 }
 
-                self.calculate_mass(particles);
+                self.calculate_mass(particles, conv);
             }
             OptionalMass::Point(_) => {
                 unreachable_debug!("leaves without a particle shouldn't exist");
@@ -278,7 +302,7 @@ impl SimdNode {
 }
 
 impl super::Node for SimdNode {
-    fn new(center: Vector3<f32>, width: f32, particle: usize) -> Self {
+    fn new(center: Vector3<PosStorage>, width: PosStorage, particle: usize) -> Self {
         Self {
             subnodes: None,
             pseudoparticle: OptionalMass::Particle(ParticleArray::from_particle(particle)),
@@ -287,7 +311,7 @@ impl super::Node for SimdNode {
         }
     }
 
-    fn insert_particle(&mut self, particles: &Particles, particle: usize) {
+    fn insert_particle(&mut self, particles: &Particles, particle: usize, conv: &PosConverter) {
         match &mut self.subnodes {
             // Self is inner node, insert recursively
             Some(subnodes) => {
@@ -295,24 +319,24 @@ impl super::Node for SimdNode {
                     Self::choose_subnode(&self.center, &particles.positions[particle]);
 
                 match &mut subnodes[new_subnode] {
-                    Some(subnode) => subnode.insert_particle(particles, particle),
+                    Some(subnode) => subnode.insert_particle(particles, particle, conv),
                     None => {
                         subnodes[new_subnode] = Some(SimdNode::new(
                             Self::center_from_subnode(self.width, self.center, new_subnode),
-                            self.width / 2.,
+                            self.width / PosStorage(2),
                             particle,
                         ));
                     }
                 }
 
-                self.calculate_mass(particles);
+                self.calculate_mass(particles, conv);
             }
 
             // Self is outer node
             None => match &self.pseudoparticle {
                 // Self contains a particle, subdivide
                 OptionalMass::Particle(_) => {
-                    self.insert_particle_subdivide(particles, particle);
+                    self.insert_particle_subdivide(particles, particle, conv);
                 }
 
                 OptionalMass::Point(_) => {
@@ -322,21 +346,25 @@ impl super::Node for SimdNode {
         }
     }
 
-    fn calculate_mass(&mut self, particles: &Particles) {
+    fn calculate_mass(&mut self, particles: &Particles, conv: &PosConverter) {
         if let Some(subnodes) = &mut self.subnodes {
             let (mass, center_of_mass) = subnodes
                 .iter_mut()
                 .filter_map(|node| node.as_mut())
                 .map(|node| match &node.pseudoparticle {
                     OptionalMass::Point(pseudo) => (pseudo.mass, pseudo.position),
-                    OptionalMass::Particle(par) => par.center_of_mass(particles),
+                    OptionalMass::Particle(par) => par.center_of_mass(particles, conv),
                 })
                 .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
                     let m_sum = m_acc + m;
-                    (m_sum, (pos_acc * m_acc + pos * m) / m_sum)
+                    (
+                        m_sum,
+                        (pos_acc * m_acc + conv.pos_to_float_vec(pos) * m)
+                            / m_sum,
+                    )
                 });
 
-            self.pseudoparticle = OptionalMass::Point(PointMass::new(mass, center_of_mass));
+            self.pseudoparticle = OptionalMass::Point(PointMass::new(mass, conv.float_to_pos_vec(center_of_mass)));
         }
     }
 
@@ -346,6 +374,7 @@ impl super::Node for SimdNode {
         particle: usize,
         epsilon: f32,
         theta: f32,
+        conv: &PosConverter,
     ) -> Vector3<f32> {
         let mut acc = Vector3::zeros();
 
@@ -355,15 +384,16 @@ impl super::Node for SimdNode {
                     return acc;
                 }
 
-                let r = particles.positions[particle] - pseudo.position;
+                let r = conv.distance(particles.positions[particle], pseudo.position);
 
-                if self.width / r.norm() < theta {
+                if conv.pos_to_float(self.width) / r.norm() < theta {
                     // leaf nodes or node is far enough away
                     acc += gravity::acceleration(
                         particles.positions[particle],
                         pseudo.mass,
                         pseudo.position,
                         epsilon,
+                        conv,
                     );
                 } else {
                     // near field forces, go deeper into tree
@@ -373,7 +403,8 @@ impl super::Node for SimdNode {
                         .expect("node has neither particle nor subnodes")
                     {
                         if let Some(node) = &node {
-                            acc += node.calculate_acceleration(particles, particle, epsilon, theta);
+                            acc += node
+                                .calculate_acceleration(particles, particle, epsilon, theta, conv);
                         }
                     }
                 }
@@ -381,10 +412,10 @@ impl super::Node for SimdNode {
             OptionalMass::Particle(particle_other) => {
                 let masses = particle_other.masses(particles);
                 let positions = particle_other.positions(particles);
-                let same: WideBoolF32x8 = positions
+                let same: bu32x8 = positions
                     .iter()
                     .zip(particles.positions[particle].iter())
-                    .map(|(p2, p1)| (*p2).simd_eq(WideF32x8::splat(*p1)))
+                    .map(|(p2, p1)| (*p2).simd_eq(SimdPosStorage::splat(*p1)))
                     .reduce(|x, y| x & y)
                     .unwrap();
 
@@ -397,9 +428,10 @@ impl super::Node for SimdNode {
                     masses,
                     positions,
                     epsilon,
+                    conv,
                 )
-                .map(|elem| same.if_else(|| WideF32x8::splat(0.), || elem))
-                .map(WideF32x8::simd_horizontal_sum);
+                .map(|elem| bf32x8::from(same).if_else(|| f32x8::splat(0.), || elem))
+                .map(f32x8::simd_horizontal_sum);
             }
         }
 
@@ -429,23 +461,34 @@ impl super::Node for SimdNode {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_abs_diff_eq;
+    use approx::assert_ulps_eq;
 
     use super::*;
-    use crate::{direct_summation::DirectSummation, generate_random_particles, Simulation, Step};
+    use crate::{Simulation, Step, direct_summation::DirectSummation, generate_random_particles};
 
     #[test]
     fn symmetry() {
         let masses = vec![1e6; 2];
-        let positions = vec![Vector3::new(1., 0., 0.), Vector3::new(-1., 0., 0.)];
+        let positions = vec![
+            Vector3::new(PosStorage(u32::MAX), PosStorage(0), PosStorage(0)),
+            Vector3::new(PosStorage(0), PosStorage(0), PosStorage(0)),
+        ];
         let velocities = vec![Vector3::zeros(); 2];
         let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
 
+        let conv = PosConverter::new(10.);
         let bh = BarnesHutSimd::new(0.);
-        bh.calculate_accelerations(&particles, &mut accs, 0., Execution::SingleThreaded, false);
+        bh.calculate_accelerations(
+            &particles,
+            &mut accs,
+            0.,
+            Execution::SingleThreaded,
+            false,
+            &conv,
+        );
 
-        assert_abs_diff_eq!(accs[0], -accs[1]);
+        assert_ulps_eq!(accs[0], -accs[1]);
     }
 
     #[test]
@@ -453,10 +496,10 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let ds = DirectSummation;
-        let mut bf = Simulation::new(particles.clone(), ds, 0.);
+        let mut bf = Simulation::new(particles.clone(), ds, 0., 10.);
 
         let bh = BarnesHutSimd::new(0.);
-        let mut bh = Simulation::new(particles, bh, 0.);
+        let mut bh = Simulation::new(particles, bh, 0., 10.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bf.step(&mut acc_single, 1., Step::Middle);
@@ -464,7 +507,7 @@ mod tests {
         bh.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m);
         }
     }
 
@@ -473,8 +516,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let bh = BarnesHutSimd::new(0.);
-        let mut bh_single = Simulation::new(particles.clone(), bh, 0.);
-        let mut bh_multi = Simulation::new(particles, bh, 0.).multithreaded(2);
+        let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, bh, 0., 10.).multithreaded(2);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -482,7 +525,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m);
         }
     }
 
@@ -491,8 +534,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let bh = BarnesHutSimd::new(0.);
-        let mut bh_single = Simulation::new(particles.clone(), bh, 0.);
-        let mut bh_rayon = Simulation::new(particles, bh, 0.).rayon_iter();
+        let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
+        let mut bh_rayon = Simulation::new(particles, bh, 0., 10.).rayon_iter();
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -500,7 +543,7 @@ mod tests {
         bh_rayon.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m);
         }
     }
 }

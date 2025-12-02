@@ -4,7 +4,7 @@ use nalgebra::Vector3;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::{gravity, Execution, Particles, ShortRangeSolver};
+use crate::{Execution, Particles, ShortRangeSolver, gravity, particles::PosConverter};
 
 #[derive(Copy, Clone, Debug)]
 pub struct DirectSummation;
@@ -17,6 +17,7 @@ impl ShortRangeSolver for DirectSummation {
         epsilon: f32,
         execution: Execution,
         _sort: bool,
+        conv: &PosConverter,
     ) -> Option<Vec<usize>> {
         match execution {
             Execution::SingleThreaded => {
@@ -31,7 +32,7 @@ impl ShortRangeSolver for DirectSummation {
                         if i == j {
                             continue;
                         }
-                        *a += gravity::acceleration(*p1, *m2, *p2, epsilon);
+                        *a += gravity::acceleration(*p1, *m2, *p2, epsilon, conv);
                     }
                 }
             }
@@ -60,7 +61,7 @@ impl ShortRangeSolver for DirectSummation {
                                         if p1 == p2 {
                                             continue;
                                         }
-                                        acc += gravity::acceleration(p1, m2, p2, epsilon);
+                                        acc += gravity::acceleration(p1, m2, p2, epsilon, conv);
                                     }
                                     acc
                                 })
@@ -96,7 +97,13 @@ impl ShortRangeSolver for DirectSummation {
                             if i == j {
                                 continue;
                             }
-                            *acc += gravity::acceleration(particles.positions[i], m2, p2, epsilon);
+                            *acc += gravity::acceleration(
+                                particles.positions[i],
+                                m2,
+                                p2,
+                                epsilon,
+                                conv,
+                            );
                         }
                     });
             }
@@ -123,7 +130,7 @@ impl ShortRangeSolver for DirectSummation {
                                 if p1 == p2 {
                                     continue;
                                 }
-                                acc += gravity::acceleration(p1, m2, p2, epsilon);
+                                acc += gravity::acceleration(p1, m2, p2, epsilon, conv);
                             }
                             acc
                         })
@@ -144,7 +151,7 @@ impl ShortRangeSolver for DirectSummation {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_abs_diff_eq;
+    use approx::assert_ulps_eq;
 
     use super::*;
     use crate::*;
@@ -152,15 +159,26 @@ mod tests {
     #[test]
     fn symmetry() {
         let masses = vec![1e6; 2];
-        let positions = vec![Vector3::new(1., 0., 0.), Vector3::new(-1., 0., 0.)];
+        let positions = vec![
+            Vector3::new(PosStorage(u32::MAX), PosStorage(0), PosStorage(0)),
+            Vector3::new(PosStorage(0), PosStorage(0), PosStorage(0)),
+        ];
         let velocities = vec![Vector3::zeros(); 2];
         let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
 
+        let conv = PosConverter::new(10.);
         let ds = DirectSummation;
-        ds.calculate_accelerations(&particles, &mut accs, 0., Execution::SingleThreaded, false);
+        ds.calculate_accelerations(
+            &particles,
+            &mut accs,
+            0.,
+            Execution::SingleThreaded,
+            false,
+            &conv,
+        );
 
-        assert_abs_diff_eq!(accs[0], -accs[1]);
+        assert_ulps_eq!(accs[0], -accs[1]);
     }
 
     #[test]
@@ -168,8 +186,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let ds = DirectSummation;
-        let mut bh_single = Simulation::new(particles.clone(), ds, 0.);
-        let mut bh_multi = Simulation::new(particles, ds, 0.).multithreaded(2);
+        let mut bh_single = Simulation::new(particles.clone(), ds, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, ds, 0., 10.).multithreaded(2);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -177,7 +195,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m, epsilon = 1e-6);
         }
     }
 
@@ -186,8 +204,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let ds = DirectSummation;
-        let mut bh_single = Simulation::new(particles.clone(), ds, 0.);
-        let mut bh_multi = Simulation::new(particles, ds, 0.).rayon_iter();
+        let mut bh_single = Simulation::new(particles.clone(), ds, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, ds, 0., 10.).rayon_iter();
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -195,7 +213,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m, epsilon = 1e-6);
         }
     }
 
@@ -204,8 +222,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let ds = DirectSummation;
-        let mut bh_single = Simulation::new(particles.clone(), ds, 0.);
-        let mut bh_multi = Simulation::new(particles, ds, 0.).rayon_pool();
+        let mut bh_single = Simulation::new(particles.clone(), ds, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, ds, 0., 10.).rayon_pool();
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -213,7 +231,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m, epsilon = 1e-6);
         }
     }
 }

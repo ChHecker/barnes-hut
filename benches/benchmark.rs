@@ -1,8 +1,9 @@
 use barnes_hut::barnes_hut::{BarnesHut, BarnesHutSimd};
+use barnes_hut::particles::PosStorage;
 use barnes_hut::{Particles, Simulation};
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use nalgebra::Vector3;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 fn particles(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0);
@@ -16,13 +17,17 @@ fn particles(c: &mut Criterion) {
                     let par = (0..n_par)
                         .map(|_| {
                             (
-                                rng.gen_range(0.0..1000.0),
-                                10f32 * Vector3::new_random(),
+                                rng.random_range(0.0..1000.0),
+                                Vector3::new(
+                                    PosStorage(rng.random()),
+                                    PosStorage(rng.random()),
+                                    PosStorage(rng.random()),
+                                ),
                                 Vector3::new_random(),
                             )
                         })
                         .collect::<Particles>();
-                    Simulation::new(par, bh, 1e-5)
+                    Simulation::new(par, bh, 1e-5, 10.)
                 },
                 |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
@@ -36,13 +41,17 @@ fn particles(c: &mut Criterion) {
                     let par = (0..n_par)
                         .map(|_| {
                             (
-                                rng.gen_range(0.0..1000.0),
-                                10f32 * Vector3::new_random(),
+                                rng.random_range(0.0..1000.0),
+                                Vector3::new(
+                                    PosStorage(rng.random()),
+                                    PosStorage(rng.random()),
+                                    PosStorage(rng.random()),
+                                ),
                                 Vector3::new_random(),
                             )
                         })
                         .collect::<Particles>();
-                    Simulation::new(par, bh, 1e-5)
+                    Simulation::new(par, bh, 1e-5, 10.)
                 },
                 |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
@@ -59,13 +68,17 @@ fn particles(c: &mut Criterion) {
                         let par = (0..n_par)
                             .map(|_| {
                                 (
-                                    rng.gen_range(0.0..1000.0),
-                                    10f32 * Vector3::new_random(),
+                                    rng.random_range(0.0..1000.0),
+                                    Vector3::new(
+                                        PosStorage(rng.random()),
+                                        PosStorage(rng.random()),
+                                        PosStorage(rng.random()),
+                                    ),
                                     Vector3::new_random(),
                                 )
                             })
                             .collect::<Particles>();
-                        Simulation::new(par, bh, 1e-5).multithreaded(4)
+                        Simulation::new(par, bh, 1e-5, 10.).multithreaded(4)
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -83,13 +96,17 @@ fn particles(c: &mut Criterion) {
                         let par = (0..n_par)
                             .map(|_| {
                                 (
-                                    rng.gen_range(0.0..1000.0),
-                                    10f32 * Vector3::new_random(),
+                                    rng.random_range(0.0..1000.0),
+                                    Vector3::new(
+                                        PosStorage(rng.random()),
+                                        PosStorage(rng.random()),
+                                        PosStorage(rng.random()),
+                                    ),
                                     Vector3::new_random(),
                                 )
                             })
                             .collect::<Particles>();
-                        Simulation::new(par, bh, 1e-5).rayon_iter()
+                        Simulation::new(par, bh, 1e-5, 10.).rayon_iter()
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -107,13 +124,13 @@ fn particles(c: &mut Criterion) {
                         let par = (0..n_par)
                             .map(|_| {
                                 (
-                                    rng.gen_range(0.0..1000.0),
-                                    10f32 * Vector3::new_random(),
+                                    rng.random_range(0.0..1000.0),
+                                    Vector3::new_random(),
                                     Vector3::new_random(),
                                 )
                             })
                             .collect::<Particles>();
-                        Simulation::new(par, bh, 1e-5).rayon_pool()
+                        Simulation::new(par, bh, 1e-5, 10.).rayon_pool()
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -129,8 +146,8 @@ fn theta(c: &mut Criterion) {
     let particles = (0..50)
         .map(|_| {
             (
-                rng.gen_range(0.0..1000.0),
-                10f32 * Vector3::new_random(),
+                rng.random_range(0.0..1000.0),
+                Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -142,7 +159,7 @@ fn theta(c: &mut Criterion) {
             b.iter_batched_ref(
                 || {
                     let bh = BarnesHut::new(theta);
-                    Simulation::new(particles.clone(), bh, 1e-5)
+                    Simulation::new(particles.clone(), bh, 1e-5, 10.)
                 },
                 |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
@@ -153,7 +170,7 @@ fn theta(c: &mut Criterion) {
             b.iter_batched_ref(
                 || {
                     let bh = BarnesHutSimd::new(theta);
-                    Simulation::new(particles.clone(), bh, 1e-5)
+                    Simulation::new(particles.clone(), bh, 1e-5, 10.)
                 },
                 |bh| bh.simulate(0.1, 10),
                 BatchSize::SmallInput,
@@ -168,8 +185,8 @@ fn sorting(c: &mut Criterion) {
     let particles = (0..200)
         .map(|_| {
             (
-                rng.gen_range(0.0..1000.0),
-                10f32 * Vector3::new_random(),
+                rng.random_range(0.0..1000.0),
+                Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -181,8 +198,7 @@ fn sorting(c: &mut Criterion) {
             b.iter_batched_ref(
                 || {
                     let bh = BarnesHutSimd::new(1.5);
-                    Simulation::new(particles.clone(), bh, 1e-5)
-                        .sorting(n)
+                    Simulation::new(particles.clone(), bh, 1e-5, 10.).sorting(n)
                 },
                 |bh| bh.simulate(0.1, 1000),
                 BatchSize::SmallInput,
@@ -197,8 +213,8 @@ fn optimization(c: &mut Criterion) {
     let particles = (0..100_000)
         .map(|_| {
             (
-                rng.gen_range(0.0..1000.0),
-                10f32 * Vector3::new_random(),
+                rng.random_range(0.0..1000.0),
+                Vector3::new_random(),
                 Vector3::new_random(),
             )
         })
@@ -209,7 +225,7 @@ fn optimization(c: &mut Criterion) {
     let bh = BarnesHut::new(1.5);
     group.bench_function("standard", |b| {
         b.iter_batched_ref(
-            || Simulation::new(particles.clone(), bh, 1e-5),
+            || Simulation::new(particles.clone(), bh, 1e-5, 10.),
             |bh| bh.simulate(0.1, 2),
             BatchSize::SmallInput,
         )
@@ -219,7 +235,7 @@ fn optimization(c: &mut Criterion) {
     group.bench_function("optimal", |b| {
         b.iter_batched_ref(
             || {
-                Simulation::new(particles.clone(), bh, 1e-5)
+                Simulation::new(particles.clone(), bh, 1e-5, 10.)
                     .sorting(1)
                     .rayon_pool()
             },

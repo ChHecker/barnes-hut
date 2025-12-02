@@ -4,7 +4,10 @@ use std::{sync::mpsc, thread};
 use rayon::prelude::*;
 
 use super::{Node, Particles, PointMass, Subnodes, Vector3};
-use crate::{gravity, Execution, ShortRangeSolver};
+use crate::{
+    Execution, ShortRangeSolver, gravity,
+    particles::{PosConverter, PosStorage},
+};
 
 #[derive(Clone, Debug)]
 pub(super) enum OptionalMass {
@@ -32,12 +35,13 @@ impl ShortRangeSolver for BarnesHut {
         epsilon: f32,
         execution: Execution,
         sort: bool,
+        conv: &PosConverter,
     ) -> Option<Vec<usize>> {
         match execution {
             Execution::SingleThreaded => {
-                let octree = ScalarNode::from_particles(particles);
+                let octree = ScalarNode::from_particles(particles, conv);
                 accelerations.iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta);
+                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
                 });
                 if sort {
                     let mut sorted_indices = Vec::new();
@@ -60,11 +64,13 @@ impl ShortRangeSolver for BarnesHut {
                         let local_particles = &local_particles[i];
 
                         s.spawn(move || {
-                            let octree = ScalarNode::from_indices(particles, local_particles);
+                            let octree = ScalarNode::from_indices(particles, local_particles, conv);
 
                             let acc: Vec<_> = (0..particles.len())
                                 .map(|p| {
-                                    octree.calculate_acceleration(particles, p, epsilon, self.theta)
+                                    octree.calculate_acceleration(
+                                        particles, p, epsilon, self.theta, conv,
+                                    )
                                 })
                                 .collect();
                             tx_acc.send(acc).unwrap();
@@ -100,9 +106,9 @@ impl ShortRangeSolver for BarnesHut {
             }
             #[cfg(feature = "rayon")]
             Execution::RayonIter => {
-                let octree = ScalarNode::from_particles(particles);
+                let octree = ScalarNode::from_particles(particles, conv);
                 accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta);
+                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
                 });
                 if sort {
                     let mut sorted_indices = Vec::new();
@@ -119,7 +125,8 @@ impl ShortRangeSolver for BarnesHut {
                     ScalarNode::divide_particles_to_threads(particles, num_threads);
 
                 let res = rayon::broadcast(|ctx| {
-                    let octree = ScalarNode::from_indices(particles, &local_particles[ctx.index()]);
+                    let octree =
+                        ScalarNode::from_indices(particles, &local_particles[ctx.index()], conv);
 
                     let sorted_indices = if sort {
                         let mut sorted_indices = Vec::new();
@@ -129,7 +136,9 @@ impl ShortRangeSolver for BarnesHut {
                         None
                     };
                     let accelerations = (0..particles.len())
-                        .map(|p| octree.calculate_acceleration(particles, p, epsilon, self.theta))
+                        .map(|p| {
+                            octree.calculate_acceleration(particles, p, epsilon, self.theta, conv)
+                        })
                         .collect::<Vec<_>>();
 
                     (accelerations, sorted_indices)
@@ -161,8 +170,8 @@ impl ShortRangeSolver for BarnesHut {
 pub(super) struct ScalarNode {
     pub(super) subnodes: Option<Box<Subnodes<Self>>>,
     pub(super) pseudoparticle: OptionalMass,
-    center: Vector3<f32>,
-    width: f32,
+    center: Vector3<PosStorage>,
+    width: PosStorage,
 }
 
 impl ScalarNode {
@@ -171,6 +180,7 @@ impl ScalarNode {
         particles: &Particles,
         previous_particle: usize,
         new_particle: usize,
+        conv: &PosConverter,
     ) {
         let mut new_nodes: Subnodes<Self> = Default::default();
 
@@ -179,7 +189,7 @@ impl ScalarNode {
             Self::choose_subnode(&self.center, &particles.positions[previous_particle]);
         let previous_node = Self::new(
             Self::center_from_subnode(self.width, self.center, previous_index),
-            self.width / 2.,
+            self.width / PosStorage(2),
             previous_particle,
         );
 
@@ -190,7 +200,7 @@ impl ScalarNode {
         if new_index != previous_index {
             let new_node = ScalarNode::new(
                 Self::center_from_subnode(self.width, self.center, new_index),
-                self.width / 2.,
+                self.width / PosStorage(2),
                 new_particle,
             );
             // Insert new particle
@@ -202,14 +212,14 @@ impl ScalarNode {
 
         // If particles belong in the same cell, call insert on self so self can be subdivided again
         if previous_index == new_index {
-            self.insert_particle(particles, new_particle);
+            self.insert_particle(particles, new_particle, conv);
         }
-        self.calculate_mass(particles);
+        self.calculate_mass(particles, conv);
     }
 }
 
 impl super::Node for ScalarNode {
-    fn new(center: Vector3<f32>, width: f32, particle: usize) -> Self {
+    fn new(center: Vector3<PosStorage>, width: PosStorage, particle: usize) -> Self {
         Self {
             subnodes: None,
             pseudoparticle: OptionalMass::Particle(particle),
@@ -218,7 +228,7 @@ impl super::Node for ScalarNode {
         }
     }
 
-    fn insert_particle(&mut self, particles: &Particles, particle: usize) {
+    fn insert_particle(&mut self, particles: &Particles, particle: usize, conv: &PosConverter) {
         match &mut self.subnodes {
             // Self is inner node, insert recursively
             Some(subnodes) => {
@@ -226,24 +236,24 @@ impl super::Node for ScalarNode {
                     Self::choose_subnode(&self.center, &particles.positions[particle]);
 
                 match &mut subnodes[new_subnode] {
-                    Some(subnode) => subnode.insert_particle(particles, particle),
+                    Some(subnode) => subnode.insert_particle(particles, particle, conv),
                     None => {
                         subnodes[new_subnode] = Some(ScalarNode::new(
                             Self::center_from_subnode(self.width, self.center, new_subnode),
-                            self.width / 2.,
+                            self.width / PosStorage(2),
                             particle,
                         ));
                     }
                 }
 
-                self.calculate_mass(particles);
+                self.calculate_mass(particles, conv);
             }
 
             // Self is outer node
             None => match self.pseudoparticle {
                 // Self contains a particle, subdivide
                 OptionalMass::Particle(previous_particle) => {
-                    self.insert_particle_subdivide(particles, previous_particle, particle);
+                    self.insert_particle_subdivide(particles, previous_particle, particle, conv);
                 }
 
                 OptionalMass::Point(_) => {
@@ -253,7 +263,7 @@ impl super::Node for ScalarNode {
         }
     }
 
-    fn calculate_mass(&mut self, particles: &Particles) {
+    fn calculate_mass(&mut self, particles: &Particles, conv: &PosConverter) {
         if let Some(subnodes) = &mut self.subnodes {
             let (mass, center_of_mass) = subnodes
                 .iter_mut()
@@ -266,10 +276,14 @@ impl super::Node for ScalarNode {
                 })
                 .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (&m, pos)| {
                     let m_sum = m_acc + m;
-                    (m_sum, (pos_acc * m_acc + pos * m) / m_sum)
+                    (
+                        m_sum,
+                        (pos_acc * m_acc + conv.pos_to_float_vec(*pos) * m)
+                            / m_sum,
+                    )
                 });
 
-            self.pseudoparticle = OptionalMass::Point(PointMass::new(mass, center_of_mass));
+            self.pseudoparticle = OptionalMass::Point(PointMass::new(mass, conv.float_to_pos_vec(center_of_mass)));
         }
     }
 
@@ -279,6 +293,7 @@ impl super::Node for ScalarNode {
         particle: usize,
         epsilon: f32,
         theta: f32,
+        conv: &PosConverter,
     ) -> Vector3<f32> {
         let mut acc = Vector3::zeros();
 
@@ -288,15 +303,16 @@ impl super::Node for ScalarNode {
                     return acc;
                 }
 
-                let r = particles.positions[particle] - pseudo.position;
+                let r = conv.distance(particles.positions[particle], pseudo.position);
 
-                if self.width / r.norm() < theta {
+                if conv.pos_to_float(self.width) / r.norm() < theta {
                     // leaf nodes or node is far enough away
                     acc += gravity::acceleration(
                         particles.positions[particle],
                         pseudo.mass,
                         pseudo.position,
                         epsilon,
+                        conv,
                     );
                 } else {
                     // near field forces, go deeper into tree
@@ -306,7 +322,8 @@ impl super::Node for ScalarNode {
                         .expect("node has neither particle nor subnodes")
                     {
                         if let Some(node) = &node {
-                            acc += node.calculate_acceleration(particles, particle, epsilon, theta);
+                            acc += node
+                                .calculate_acceleration(particles, particle, epsilon, theta, conv);
                         }
                     }
                 }
@@ -321,6 +338,7 @@ impl super::Node for ScalarNode {
                     particles.masses[*index2],
                     particles.positions[*index2],
                     epsilon,
+                    conv,
                 );
             }
         }
@@ -347,23 +365,42 @@ impl super::Node for ScalarNode {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_abs_diff_eq;
+    use approx::assert_ulps_eq;
 
     use super::*;
-    use crate::{direct_summation::DirectSummation, generate_random_particles, Simulation, Step};
+    use crate::{Simulation, Step, direct_summation::DirectSummation, generate_random_particles};
 
     #[test]
     fn symmetry() {
         let masses = vec![1e6; 2];
-        let positions = vec![Vector3::new(1., 0., 0.), Vector3::new(-1., 0., 0.)];
+        let positions = vec![
+            Vector3::new(
+                PosStorage(u32::MAX),
+                PosStorage(u32::MAX / 2),
+                PosStorage(u32::MAX / 2),
+            ),
+            Vector3::new(
+                PosStorage(0),
+                PosStorage(u32::MAX / 2),
+                PosStorage(u32::MAX / 2),
+            ),
+        ];
         let velocities = vec![Vector3::zeros(); 2];
         let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
 
+        let conv = PosConverter::new(10.);
         let bh = BarnesHut::new(0.);
-        bh.calculate_accelerations(&particles, &mut accs, 0., Execution::SingleThreaded, false);
+        bh.calculate_accelerations(
+            &particles,
+            &mut accs,
+            0.,
+            Execution::SingleThreaded,
+            false,
+            &conv,
+        );
 
-        assert_abs_diff_eq!(accs[0], -accs[1]);
+        assert_ulps_eq!(accs[0], -accs[1]);
     }
 
     #[test]
@@ -371,10 +408,10 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let ds = DirectSummation;
-        let mut bf = Simulation::new(particles.clone(), ds, 0.);
+        let mut bf = Simulation::new(particles.clone(), ds, 0., 10.);
 
         let bh = BarnesHut::new(0.);
-        let mut bh = Simulation::new(particles, bh, 0.);
+        let mut bh = Simulation::new(particles, bh, 0., 10.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bf.step(&mut acc_single, 1., Step::Middle);
@@ -382,7 +419,7 @@ mod tests {
         bh.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m);
         }
     }
 
@@ -391,8 +428,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let bh = BarnesHut::new(0.);
-        let mut bh_single = Simulation::new(particles.clone(), bh, 0.);
-        let mut bh_multi = Simulation::new(particles, bh, 0.).multithreaded(2);
+        let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, bh, 0., 10.).multithreaded(2);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -400,7 +437,7 @@ mod tests {
         bh_multi.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m);
         }
     }
 
@@ -409,8 +446,8 @@ mod tests {
         let particles = generate_random_particles(50);
 
         let bh = BarnesHut::new(0.);
-        let mut bh_single = Simulation::new(particles.clone(), bh, 0.);
-        let mut bh_rayon = Simulation::new(particles, bh, 0.).rayon_iter();
+        let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
+        let mut bh_rayon = Simulation::new(particles, bh, 0., 10.).rayon_iter();
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -418,7 +455,7 @@ mod tests {
         bh_rayon.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_abs_diff_eq!(s, m);
+            assert_ulps_eq!(s, m);
         }
     }
 }

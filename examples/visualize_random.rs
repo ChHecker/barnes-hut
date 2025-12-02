@@ -1,5 +1,7 @@
-use barnes_hut::{barnes_hut::BarnesHutSimd, particles::creator::DistrParticleCreator, visualization::Visualizer};
-use rand::{rngs::StdRng, SeedableRng};
+use barnes_hut::{
+    barnes_hut::BarnesHutSimd, particles::DistrParticleCreator, visualization::Visualizer,
+};
+use rand::{SeedableRng, rngs::StdRng};
 use rand_distr::{Normal, Uniform};
 
 const SPEED: f32 = 0.00000001;
@@ -9,8 +11,8 @@ fn main() {
     let epsilon = 0.1;
 
     // Generate random masses, positions, and velocities.
-    let uniform_mass = Uniform::new(0.99e2, 1e2);
-    let normal_pos = Normal::new(0., 1.).unwrap();
+    let uniform_mass = Uniform::new(0.99e2, 1e2).unwrap();
+    let normal_pos = Uniform::new(0, u32::MAX).unwrap();
     let normal_vel = Normal::new(0., 0.01).unwrap();
 
     let pc = DistrParticleCreator::rng(uniform_mass, normal_pos, normal_vel, rng);
