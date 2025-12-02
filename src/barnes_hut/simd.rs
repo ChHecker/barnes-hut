@@ -453,10 +453,6 @@ impl super::Node for SimdNode {
                     .reduce(|x, y| x & y)
                     .unwrap();
 
-                // acc += acceleration
-                //     .eval_simd(particle.point_charge(), &pars)
-                //     .map(|elem| same.if_else(|| F::Simd::splat(F::zero()), || elem))
-                //     .map(|elem| elem.simd_horizontal_sum());
                 acc += gravity::acceleration_simd(
                     particles.positions[particle],
                     masses,
