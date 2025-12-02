@@ -11,18 +11,18 @@ use nalgebra::Vector3;
 /// This struct is used to utilize the Struct-of-Arrays (SOA) architecture.
 #[derive(Clone, Debug)]
 pub struct Particles {
-    pub(crate) masses: Vec<f32>,
-    pub(crate) positions: Vec<Vector3<PosStorage>>,
-    pub(crate) velocities: Vec<Vector3<f32>>,
-    pub(crate) ignore: Vec<bool>,
+    pub(crate) masses: Box<[f32]>,
+    pub(crate) positions: Box<[Vector3<PosStorage>]>,
+    pub(crate) velocities: Box<[Vector3<f32>]>,
+    pub(crate) ignore: Box<[bool]>,
 }
 
 impl Particles {
     #[must_use]
     pub fn new(
-        masses: Vec<f32>,
-        positions: Vec<Vector3<PosStorage>>,
-        velocities: Vec<Vector3<f32>>,
+        masses: Box<[f32]>,
+        positions: Box<[Vector3<PosStorage>]>,
+        velocities: Box<[Vector3<f32>]>,
     ) -> Self {
         let len = masses.len();
         assert_eq!(len, positions.len());
@@ -32,7 +32,7 @@ impl Particles {
             masses,
             positions,
             velocities,
-            ignore: vec![false; len],
+            ignore: vec![false; len].into_boxed_slice(),
         }
     }
 
@@ -43,12 +43,12 @@ impl Particles {
         velocities: impl IntoIterator<Item = Vector3<f32>>,
         conv: &PosConverter,
     ) -> Self {
-        let masses: Vec<f32> = masses.into_iter().collect();
-        let positions: Vec<Vector3<PosStorage>> = positions
+        let masses: Box<[f32]> = masses.into_iter().collect();
+        let positions: Box<[Vector3<PosStorage>]> = positions
             .into_iter()
             .map(|pos| pos.map(|p| conv.float_to_pos(p)))
             .collect();
-        let velocities: Vec<Vector3<f32>> = velocities.into_iter().collect();
+        let velocities: Box<[Vector3<f32>]> = velocities.into_iter().collect();
 
         let len = masses.len();
         assert_eq!(len, positions.len());
@@ -58,7 +58,7 @@ impl Particles {
             masses,
             positions,
             velocities,
-            ignore: vec![false; len],
+            ignore: vec![false; len].into_boxed_slice(),
         }
     }
 
@@ -93,7 +93,9 @@ impl Particles {
 }
 
 impl FromIterator<(f32, Vector3<PosStorage>, Vector3<f32>)> for Particles {
-    fn from_iter<T: IntoIterator<Item = (f32, Vector3<PosStorage>, Vector3<f32>)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (f32, Vector3<PosStorage>, Vector3<f32>)>>(
+        iter: T,
+    ) -> Self {
         let iter = iter.into_iter();
         let cap = iter.size_hint().0;
         let mut masses = Vec::with_capacity(cap);
@@ -108,10 +110,10 @@ impl FromIterator<(f32, Vector3<PosStorage>, Vector3<f32>)> for Particles {
 
         let len = masses.len();
         Self {
-            masses,
-            positions,
-            velocities,
-            ignore: vec![false; len],
+            masses: masses.into_boxed_slice(),
+            positions: positions.into_boxed_slice(),
+            velocities: velocities.into_boxed_slice(),
+            ignore: vec![false; len].into_boxed_slice(),
         }
     }
 }

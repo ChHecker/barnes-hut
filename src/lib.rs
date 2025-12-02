@@ -15,18 +15,6 @@ pub use particles::Particles;
 use nalgebra::{DMatrix, Vector3};
 
 #[derive(Copy, Clone, Debug)]
-pub enum Execution {
-    SingleThreaded,
-    Multithreaded {
-        num_threads: usize,
-    },
-    #[cfg(feature = "rayon")]
-    RayonIter,
-    #[cfg(feature = "rayon")]
-    RayonPool,
-}
-
-#[derive(Copy, Clone, Debug)]
 pub enum Sorting {
     None,
     EveryNIteration(usize),
@@ -38,9 +26,8 @@ pub trait ShortRangeSolver {
         particles: &Particles,
         accelerations: &mut [Vector3<f32>],
         epsilon: f32,
-        execution: Execution,
         sort: bool,
-        conv: &PosConverter
+        conv: &PosConverter,
     ) -> Option<Vec<usize>>;
 }
 
@@ -61,9 +48,10 @@ impl Step {
             Step::Last
         } else {
             if let Sorting::EveryNIteration(n) = sorting
-                && index.is_multiple_of(n) {
-                    return Step::Sort;
-                }
+                && index.is_multiple_of(n)
+            {
+                return Step::Sort;
+            }
             Step::Middle
         }
     }
@@ -98,7 +86,6 @@ pub struct Simulation<S: ShortRangeSolver> {
     particles: Particles,
     pub conv: PosConverter,
     short_range_solver: S,
-    execution: Execution,
     sorting: Sorting,
     epsilon: f32,
 }
@@ -110,41 +97,9 @@ impl<S: ShortRangeSolver> Simulation<S> {
             particles,
             conv,
             short_range_solver,
-            execution: Execution::SingleThreaded,
             sorting: Sorting::None,
             epsilon,
         }
-    }
-
-    /// Calculate the forces with multiple threads.
-    ///
-    /// Every thread gets its own tree with a part of the particles
-    /// and calculates for all particles the forces from its own tree.
-    #[must_use]
-    pub fn multithreaded(mut self, num_threads: usize) -> Self {
-        self.execution = Execution::Multithreaded { num_threads };
-        self
-    }
-
-    /// Use Rayon to calculate the forces with multiple threads.
-    ///
-    /// All threads calculate the forces from the shared tree, splitting the particles.
-    #[cfg(feature = "rayon")]
-    #[must_use]
-    pub fn rayon_iter(mut self) -> Self {
-        self.execution = Execution::RayonIter;
-        self
-    }
-
-    /// Use Rayon to calculate the forces with multiple threads.
-    ///
-    /// Every thread gets its own tree with a part of the particles
-    /// and calculates for all particles the forces from its own tree.
-    #[cfg(feature = "rayon")]
-    #[must_use]
-    pub fn rayon_pool(mut self) -> Self {
-        self.execution = Execution::RayonPool;
-        self
     }
 
     /// How frequently to sort the particles.
@@ -191,9 +146,8 @@ impl<S: ShortRangeSolver> Simulation<S> {
             &self.particles,
             accelerations,
             self.epsilon,
-            self.execution,
             sort,
-            &self.conv
+            &self.conv,
         );
 
         if let Some(mut sorted_indices) = sorted_indices {
@@ -281,7 +235,7 @@ use crate::particles::{PosConverter, PosStorage};
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     use super::*;
 
@@ -293,9 +247,9 @@ mod tests {
                 (
                     rng.random_range(0.0..1e9),
                     Vector3::new(
-                        PosStorage(rng.random_range(u32::MAX/4..3 * (u32::MAX / 4))),
-                        PosStorage(rng.random_range(u32::MAX/4..3 * (u32::MAX / 4))),
-                        PosStorage(rng.random_range(u32::MAX/4..3 * (u32::MAX / 4))),
+                        PosStorage(rng.random_range(u32::MAX / 4..3 * (u32::MAX / 4))),
+                        PosStorage(rng.random_range(u32::MAX / 4..3 * (u32::MAX / 4))),
+                        PosStorage(rng.random_range(u32::MAX / 4..3 * (u32::MAX / 4))),
                     ),
                     Vector3::new(
                         rng.random_range(-1.0..1.0),

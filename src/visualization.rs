@@ -34,21 +34,10 @@ impl<S: 'static + ShortRangeSolver> Visualizer<S> {
                 (8, 20, m.log10() / 50.),
                 &mut engine.renderer,
                 &mut engine.objects,
-            ).unwrap();
+            )
+            .unwrap();
         }
         Ok(Self { engine, simulator })
-    }
-
-    #[must_use]
-    pub fn multithreaded(mut self, num_threads: usize) -> Self {
-        self.simulator = self.simulator.multithreaded(num_threads);
-        self
-    }
-
-    #[must_use]
-    pub fn rayon(mut self) -> Self {
-        self.simulator = self.simulator.rayon_iter();
-        self
     }
 
     /// Visualize the simulation.

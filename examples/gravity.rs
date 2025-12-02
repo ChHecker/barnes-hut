@@ -1,4 +1,6 @@
-use barnes_hut::{Particles, Simulation, Sorting, Step, barnes_hut::BarnesHutSimd, particles::PosStorage};
+use barnes_hut::{
+    Particles, Simulation, Sorting, Step, barnes_hut::BarnesHutSimd, particles::PosStorage,
+};
 use nalgebra::Vector3;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 

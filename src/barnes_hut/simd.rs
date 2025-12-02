@@ -4,9 +4,9 @@ use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use super::{Node, Particles, PointMass, ScalarNode, Subnodes, Vector3};
+use super::{Execution, Node, Particles, PointMass, ScalarNode, Subnodes, Vector3};
 use crate::{
-    Execution, ShortRangeSolver, gravity,
+    ShortRangeSolver, gravity,
     particles::{PosConverter, PosStorage, SimdPosStorage},
     simd::{bf32x8, bu32x8, f32x8},
 };
@@ -14,12 +14,47 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub struct BarnesHutSimd {
     theta: f32,
+    execution: Execution,
 }
 
 impl BarnesHutSimd {
     #[must_use]
     pub fn new(theta: f32) -> Self {
-        Self { theta }
+        Self {
+            theta,
+            execution: Execution::SingleThreaded,
+        }
+    }
+
+    /// Calculate the forces with multiple threads.
+    ///
+    /// Every thread gets its own tree with a part of the particles
+    /// and calculates for all particles the forces from its own tree.
+    #[must_use]
+    pub fn multithreaded(mut self, num_threads: usize) -> Self {
+        self.execution = Execution::Multithreaded { num_threads };
+        self
+    }
+
+    /// Use Rayon to calculate the forces with multiple threads.
+    ///
+    /// All threads calculate the forces from the shared tree, splitting the particles.
+    #[cfg(feature = "rayon")]
+    #[must_use]
+    pub fn rayon_iter(mut self) -> Self {
+        self.execution = Execution::RayonIter;
+        self
+    }
+
+    /// Use Rayon to calculate the forces with multiple threads.
+    ///
+    /// Every thread gets its own tree with a part of the particles
+    /// and calculates for all particles the forces from its own tree.
+    #[cfg(feature = "rayon")]
+    #[must_use]
+    pub fn rayon_pool(mut self) -> Self {
+        self.execution = Execution::RayonPool;
+        self
     }
 }
 
@@ -29,11 +64,10 @@ impl ShortRangeSolver for BarnesHutSimd {
         particles: &Particles,
         accelerations: &mut [Vector3<f32>],
         epsilon: f32,
-        execution: Execution,
         sort: bool,
         conv: &PosConverter,
     ) -> Option<Vec<usize>> {
-        match execution {
+        match self.execution {
             Execution::SingleThreaded => {
                 let octree = SimdNode::from_particles(particles, conv);
                 accelerations.iter_mut().enumerate().for_each(|(i, a)| {
@@ -359,12 +393,12 @@ impl super::Node for SimdNode {
                     let m_sum = m_acc + m;
                     (
                         m_sum,
-                        (pos_acc * m_acc + conv.pos_to_float_vec(pos) * m)
-                            / m_sum,
+                        (pos_acc * m_acc + conv.pos_to_float_vec(pos) * m) / m_sum,
                     )
                 });
 
-            self.pseudoparticle = OptionalMass::Point(PointMass::new(mass, conv.float_to_pos_vec(center_of_mass)));
+            self.pseudoparticle =
+                OptionalMass::Point(PointMass::new(mass, conv.float_to_pos_vec(center_of_mass)));
         }
     }
 
@@ -468,25 +502,19 @@ mod tests {
 
     #[test]
     fn symmetry() {
-        let masses = vec![1e6; 2];
+        let masses = vec![1e6; 2].into_boxed_slice();
         let positions = vec![
             Vector3::new(PosStorage(u32::MAX), PosStorage(0), PosStorage(0)),
             Vector3::new(PosStorage(0), PosStorage(0), PosStorage(0)),
-        ];
-        let velocities = vec![Vector3::zeros(); 2];
+        ]
+        .into_boxed_slice();
+        let velocities = vec![Vector3::zeros(); 2].into_boxed_slice();
         let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
 
         let conv = PosConverter::new(10.);
         let bh = BarnesHutSimd::new(0.);
-        bh.calculate_accelerations(
-            &particles,
-            &mut accs,
-            0.,
-            Execution::SingleThreaded,
-            false,
-            &conv,
-        );
+        bh.calculate_accelerations(&particles, &mut accs, 0., false, &conv);
 
         assert_ulps_eq!(accs[0], -accs[1]);
     }
@@ -495,7 +523,7 @@ mod tests {
     fn brute_force() {
         let particles = generate_random_particles(50);
 
-        let ds = DirectSummation;
+        let ds = DirectSummation::new();
         let mut bf = Simulation::new(particles.clone(), ds, 0., 10.);
 
         let bh = BarnesHutSimd::new(0.);
@@ -517,7 +545,8 @@ mod tests {
 
         let bh = BarnesHutSimd::new(0.);
         let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
-        let mut bh_multi = Simulation::new(particles, bh, 0., 10.).multithreaded(2);
+        let bh = BarnesHutSimd::new(0.).multithreaded(2);
+        let mut bh_multi = Simulation::new(particles, bh, 0., 10.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -535,7 +564,8 @@ mod tests {
 
         let bh = BarnesHutSimd::new(0.);
         let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
-        let mut bh_rayon = Simulation::new(particles, bh, 0., 10.).rayon_iter();
+        let bh = BarnesHutSimd::new(0.).rayon_iter();
+        let mut bh_rayon = Simulation::new(particles, bh, 0., 10.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);

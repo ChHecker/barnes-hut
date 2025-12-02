@@ -27,8 +27,21 @@ use crate::{
     particles::{PosConverter, PosStorage},
 };
 
+#[derive(Copy, Clone, Debug, Default)]
+pub enum Execution {
+    #[default]
+    SingleThreaded,
+    Multithreaded {
+        num_threads: usize,
+    },
+    #[cfg(feature = "rayon")]
+    RayonIter,
+    #[cfg(feature = "rayon")]
+    RayonPool,
+}
+
 #[derive(Clone, Debug)]
-pub struct PointMass {
+struct PointMass {
     pub mass: f32,
     pub position: Vector3<PosStorage>,
 }

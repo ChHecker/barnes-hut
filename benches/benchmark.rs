@@ -58,7 +58,7 @@ fn particles(c: &mut Criterion) {
             )
         });
 
-        let bh = BarnesHutSimd::new(1.5);
+        let bh = BarnesHutSimd::new(1.5).multithreaded(4);
         group.bench_with_input(
             BenchmarkId::new("simd multithreaded", n_par),
             &n_par,
@@ -78,7 +78,7 @@ fn particles(c: &mut Criterion) {
                                 )
                             })
                             .collect::<Particles>();
-                        Simulation::new(par, bh, 1e-5, 10.).multithreaded(4)
+                        Simulation::new(par, bh, 1e-5, 10.)
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -86,7 +86,7 @@ fn particles(c: &mut Criterion) {
             },
         );
 
-        let bh = BarnesHutSimd::new(1.5);
+        let bh = BarnesHutSimd::new(1.5).rayon_iter();
         group.bench_with_input(
             BenchmarkId::new("simd rayon iter", n_par),
             &n_par,
@@ -106,7 +106,7 @@ fn particles(c: &mut Criterion) {
                                 )
                             })
                             .collect::<Particles>();
-                        Simulation::new(par, bh, 1e-5, 10.).rayon_iter()
+                        Simulation::new(par, bh, 1e-5, 10.)
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -114,7 +114,7 @@ fn particles(c: &mut Criterion) {
             },
         );
 
-        let bh = BarnesHutSimd::new(1.5);
+        let bh = BarnesHutSimd::new(1.5).rayon_pool();
         group.bench_with_input(
             BenchmarkId::new("simd rayon pool", n_par),
             &n_par,
@@ -130,7 +130,7 @@ fn particles(c: &mut Criterion) {
                                 )
                             })
                             .collect::<Particles>();
-                        Simulation::new(par, bh, 1e-5, 10.).rayon_pool()
+                        Simulation::new(par, bh, 1e-5, 10.)
                     },
                     |bh| bh.simulate(0.1, 10),
                     BatchSize::SmallInput,
@@ -231,14 +231,10 @@ fn optimization(c: &mut Criterion) {
         )
     });
 
-    let bh = BarnesHutSimd::new(1.5);
+    let bh = BarnesHutSimd::new(1.5).rayon_pool();
     group.bench_function("optimal", |b| {
         b.iter_batched_ref(
-            || {
-                Simulation::new(particles.clone(), bh, 1e-5, 10.)
-                    .sorting(1)
-                    .rayon_pool()
-            },
+            || Simulation::new(particles.clone(), bh, 1e-5, 10.).sorting(1),
             |bh| bh.simulate(0.1, 2),
             BatchSize::SmallInput,
         )

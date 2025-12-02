@@ -127,7 +127,7 @@ mod random {
                 radial_distr,
                 first_par: true,
                 conv,
-                box_size
+                box_size,
             }
         }
     }
@@ -189,7 +189,10 @@ mod random {
             let last = pos.row(num_steps);
             for i in 0..3 {
                 assert!(last[0][i].0 > u32::MAX / 2 - 5 && last[0][i].0 < u32::MAX / 2 + 5);
-                assert!(last[0][i].0 > u32::MAX / 2 - u32::MAX / 5 && last[0][i].0 < u32::MAX / 2 + u32::MAX / 5);
+                assert!(
+                    last[0][i].0 > u32::MAX / 2 - u32::MAX / 5
+                        && last[0][i].0 < u32::MAX / 2 + u32::MAX / 5
+                );
             }
         }
     }
