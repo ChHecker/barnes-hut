@@ -1,6 +1,0 @@
-#!/bin/sh
-GIT_FORMAT_STAGED='git-format-staged.py'
-"$GIT_FORMAT_STAGED" --formatter "cargo fmt"
-
-exit "$result"
-
