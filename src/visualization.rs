@@ -26,6 +26,8 @@ impl<S: 'static + ShortRangeSolver> Visualizer<S> {
             title: "N-body simulation",
             ..Default::default()
         })?;
+        engine.camera.set_position([0.5, 0.5, 1.]);
+        engine.camera.set_target([0.5, 0.5, 0.5]);
 
         for (i, m) in simulator.masses().enumerate() {
             uv_sphere(
@@ -58,11 +60,22 @@ impl<S: 'static + ShortRangeSolver> Visualizer<S> {
             // println!("FPS: {}", 1. / time.elapsed().as_secs_f64());
             self.simulator.step(&mut accelerations, step, current_step);
 
-            for (i, pos) in self.simulator.positions().enumerate() {
-                let pos = self.simulator.conv.pos_to_float_vec(*pos);
-
+            for (i, (pos, ignore)) in self
+                .simulator
+                .positions()
+                .zip(self.simulator.ignore())
+                .enumerate()
+            {
                 let part = format!("particle{i}");
+
+                if *ignore {
+                    engine.objects.remove(part.as_str());
+                    continue;
+                }
+
                 let obj = engine.objects.get_mut(part.as_str()).unwrap();
+
+                let pos = self.simulator.conv.pos_to_float_vec(*pos);
                 obj.set_position([pos.x, pos.y, pos.z]);
 
                 let col = (0.5 * (pos.z + 2.) + 0.3).clamp(0.2, 1.);
@@ -87,7 +100,7 @@ impl<S: 'static + ShortRangeSolver> Visualizer<S> {
         height: u32,
     ) -> color_eyre::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
-        let sim = Simulation::new(particles, short_range_solver, epsilon, 10.);
+        let sim = Simulation::new(particles, short_range_solver, epsilon, 1.);
 
         Self::new(sim, width, height)
     }

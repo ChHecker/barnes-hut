@@ -62,7 +62,7 @@ where
     fn new(center: Vector3<PosStorage>, width: PosStorage, index: usize) -> Self;
 
     fn from_particles(particles: &Particles, conv: &PosConverter) -> Self {
-        let (center, width) = Self::get_center_and_width(&particles.positions);
+        let (center, width) = Self::get_center_and_width();
 
         let mut node = Self::new(center, width, 0);
 
@@ -76,7 +76,7 @@ where
     }
 
     fn from_indices(particles: &Particles, indices: &[usize], conv: &PosConverter) -> Self {
-        let (center, width) = Self::get_center_and_width(&particles.positions);
+        let (center, width) = Self::get_center_and_width();
 
         let mut iter = indices.iter();
         let mut node = Self::new(center, width, *iter.next().unwrap());
@@ -90,45 +90,13 @@ where
         node
     }
 
-    fn get_center_and_width(
-        positions: &[Vector3<PosStorage>],
-    ) -> (Vector3<PosStorage>, PosStorage) {
-        let mut v_min = Vector3::from_element(PosStorage(u32::MAX));
-        let mut v_max = Vector3::from_element(PosStorage(u32::MIN));
-        for pos in positions {
-            for (i, elem) in pos.iter().enumerate() {
-                if *elem > v_max[i] {
-                    v_max[i] = *elem;
-                }
-                if *elem < v_min[i] {
-                    v_min[i] = *elem;
-                }
-            }
-        }
-
-        dbg!(v_min);
-        dbg!(v_max);
-
-        for v in &mut v_min {
-            if *v < PosStorage(u32::MAX / 10) {
-                *v = PosStorage(0);
-            }
-        }
-        for v in &mut v_max {
-            if *v > PosStorage(9 * (u32::MAX / 10)) {
-                *v = PosStorage(u32::MAX);
-            }
-        }
-
-        dbg!(v_min);
-        dbg!(v_max);
-
-        let width = (v_max - v_min).max();
-        let center = v_min + (v_max - v_min) / PosStorage(2);
-
-        dbg!(width);
-        dbg!(center);
-
+    fn get_center_and_width() -> (Vector3<PosStorage>, PosStorage) {
+        let center = Vector3::new(
+            PosStorage(u32::MAX / 2),
+            PosStorage(u32::MAX / 2),
+            PosStorage(u32::MAX / 2),
+        );
+        let width = PosStorage(u32::MAX);
         (center, width)
     }
 
@@ -202,7 +170,7 @@ where
             unimplemented!()
         }
 
-        let (center, _) = Self::get_center_and_width(&particles.positions);
+        let (center, _) = Self::get_center_and_width();
         let mut local_particles: Vec<Vec<usize>> = vec![Vec::new(); num_threads];
         for i in 0..particles.len() {
             let subnode = Self::choose_subnode(&center, &particles.positions[i]);

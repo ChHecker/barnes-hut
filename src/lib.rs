@@ -132,6 +132,10 @@ impl<S: ShortRangeSolver> Simulation<S> {
         self.particles.velocities.iter()
     }
 
+    pub fn ignore(&self) -> impl Iterator<Item = &bool> {
+        self.particles.ignore.iter()
+    }
+
     /// Do a single simulation step.
     ///
     /// # Arguments
