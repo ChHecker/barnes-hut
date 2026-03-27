@@ -182,7 +182,7 @@ mod random {
             );
             let par = pc.create_particles(2);
 
-            let bh = BarnesHut::new(0.);
+            let bh = BarnesHut::<1>::new(0.);
             let mut bh = Simulation::new(par, bh, 0., 10.);
             let pos = bh.simulate(0.1, num_steps);
 

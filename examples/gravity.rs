@@ -46,7 +46,7 @@ fn main() {
         })
         .collect::<Particles>();
 
-    let bh = BarnesHut::new(1.5);
+    let bh = BarnesHut::<1>::new(1.5);
     let mut bh = Simulation::new(particles, bh, 1e-5, box_size).sorting(1);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];

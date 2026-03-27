@@ -177,7 +177,7 @@ impl SimdNode {
 
                 let new_index =
                     Self::choose_subnode(&self.center, &particles.positions[new_particle]);
-                let new_node = SimdNode::new(
+                let new_node = Self::new(
                     Self::center_from_subnode(self.width, self.center, new_index),
                     self.width / PosStorage(2),
                     new_particle,

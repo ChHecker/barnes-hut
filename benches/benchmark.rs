@@ -38,7 +38,7 @@ fn particles(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("barnes hut particles");
     for n_par in [100, 1_000, 10_000, 100_000] {
-        let bh = BarnesHut::new(1.5);
+        let bh = BarnesHut::<1>::new(1.5);
         group.bench_with_input(BenchmarkId::new("scalar", n_par), &n_par, |b, &n_par| {
             b.iter_batched_ref(
                 || {
@@ -62,8 +62,44 @@ fn particles(c: &mut Criterion) {
             )
         });
 
-        let bh = BarnesHut::new(1.5);
+        let bh = BarnesHut::<1>::new(1.5);
         group.bench_with_input(BenchmarkId::new("scalar gaussian", n_par), &n_par, |b, &n_par| {
+            b.iter_batched_ref(
+                || {
+                    let par = generate_clusters(&mut rng, n_par, 10);
+                    Simulation::new(par, bh, 1e-5, 10.)
+                },
+                |bh| bh.simulate(0.1, 10),
+                BatchSize::SmallInput,
+            )
+        });
+
+        let bh = BarnesHut::<2>::new(1.5);
+        group.bench_with_input(BenchmarkId::new("scalar 2", n_par), &n_par, |b, &n_par| {
+            b.iter_batched_ref(
+                || {
+                    let par = (0..n_par)
+                        .map(|_| {
+                            (
+                                rng.random_range(0.0..1000.0),
+                                Vector3::new(
+                                    PosStorage(rng.random()),
+                                    PosStorage(rng.random()),
+                                    PosStorage(rng.random()),
+                                ),
+                                Vector3::new_random(),
+                            )
+                        })
+                        .collect::<Particles>();
+                    Simulation::new(par, bh, 1e-5, 10.)
+                },
+                |bh| bh.simulate(0.1, 10),
+                BatchSize::SmallInput,
+            )
+        });
+
+        let bh = BarnesHut::<2>::new(1.5);
+        group.bench_with_input(BenchmarkId::new("scalar gaussian 2", n_par), &n_par, |b, &n_par| {
             b.iter_batched_ref(
                 || {
                     let par = generate_clusters(&mut rng, n_par, 10);
@@ -134,7 +170,7 @@ fn theta(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("scalar", theta), &theta, |b, &theta| {
             b.iter_batched_ref(
                 || {
-                    let bh = BarnesHut::new(theta);
+                    let bh = BarnesHut::<1>::new(theta);
                     Simulation::new(particles.clone(), bh, 1e-5, 10.)
                 },
                 |bh| bh.simulate(0.1, 10),

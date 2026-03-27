@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use super::{Node, Particles, PointMass, Subnodes, Vector3};
 use crate::{
     ShortRangeSolver, gravity,
@@ -6,25 +8,81 @@ use crate::{
 
 use rayon::prelude::*;
 
+#[derive(Copy, Clone, Debug)]
+pub(super) struct ParticleArray<const N: usize> {
+    arr: [usize; N],
+    len: usize,
+}
+
+impl<const N: usize> ParticleArray<N> {
+    fn from_particle(particle: usize) -> Self {
+        let mut arr = [0; N];
+        arr[0] = particle;
+        Self { arr, len: 1 }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn push(&mut self, particle: usize) -> bool {
+        if self.len >= N {
+            return false;
+        }
+
+        self.arr[self.len()] = particle;
+        self.len += 1;
+
+        true
+    }
+
+    fn center_of_mass(
+        &self,
+        particles: &Particles,
+        conv: &PosConverter,
+    ) -> (f32, Vector3<PosStorage>) {
+        self.iter()
+            .map(|&par| (particles.masses[par], particles.positions[par]))
+            .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
+                let m_sum = m_acc + m;
+                (
+                    m_sum,
+                    conv.float_to_pos_vec(
+                        (conv.pos_to_float_vec(pos_acc) * m_acc + conv.pos_to_float_vec(pos) * m)
+                            / m_sum,
+                    ),
+                )
+            })
+    }
+}
+
+impl<const N: usize> Deref for ParticleArray<N> {
+    type Target = [usize];
+
+    fn deref(&self) -> &Self::Target {
+        &self.arr[0..self.len]
+    }
+}
+
 #[derive(Clone, Debug)]
-pub(super) enum OptionalMass {
-    Particle(usize),
+pub(super) enum OptionalMass<const N: usize> {
+    Particle(ParticleArray<N>),
     Point(PointMass),
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct BarnesHut {
+pub struct BarnesHut<const N: usize> {
     theta: f32,
 }
 
-impl BarnesHut {
+impl<const N: usize> BarnesHut<N> {
     #[must_use]
     pub fn new(theta: f32) -> Self {
         Self { theta }
     }
 }
 
-impl ShortRangeSolver for BarnesHut {
+impl<const N: usize> ShortRangeSolver for BarnesHut<N> {
     fn calculate_accelerations(
         &self,
         particles: &Particles,
@@ -33,12 +91,12 @@ impl ShortRangeSolver for BarnesHut {
         sort: bool,
         conv: &PosConverter,
     ) -> Option<Vec<usize>> {
-        let (center, width) = ScalarNode::get_center_and_width();
+        let (center, width) = ScalarNode::<N>::get_center_and_width();
 
         let now = std::time::Instant::now();
         let octree = {
             let mut indices: Vec<usize> = (0..particles.len()).collect();
-            ScalarNode::from_indices(center, width, particles, &mut indices, conv).unwrap()
+            ScalarNode::<N>::from_indices(center, width, particles, &mut indices, conv).unwrap()
         };
         println!("tree construction: {}", now.elapsed().as_millis());
 
@@ -64,62 +122,60 @@ impl ShortRangeSolver for BarnesHut {
 }
 
 #[derive(Clone)]
-pub(super) struct ScalarNode {
+pub(super) struct ScalarNode<const N: usize> {
     pub(super) subnodes: Option<Box<Subnodes<Self>>>,
-    pub(super) pseudoparticle: OptionalMass,
+    pub(super) pseudoparticle: OptionalMass<N>,
     center: Vector3<PosStorage>,
     width: PosStorage,
 }
 
-impl ScalarNode {
+impl<const N: usize> ScalarNode<N> {
     fn insert_particle_subdivide(
         &mut self,
         particles: &Particles,
-        previous_particle: usize,
         new_particle: usize,
         conv: &PosConverter,
     ) {
-        let mut new_nodes: Subnodes<Self> = Default::default();
-
-        // Create subnode for previous particle
-        let previous_index =
-            Self::choose_subnode(&self.center, &particles.positions[previous_particle]);
-        let previous_node = Self::new(
-            Self::center_from_subnode(self.width, self.center, previous_index),
-            self.width / PosStorage(2),
-            previous_particle,
-        );
-
-        let new_index = Self::choose_subnode(&self.center, &particles.positions[new_particle]);
-        // If previous and new particle belong in separate nodes, particles can be trivially inserted
-        // (self.insert_particle would crash because one node wouldn't have a mass yet)
-        // Otherwise, call insert on self below so self can be subdivided again
-        if new_index != previous_index {
-            let new_node = ScalarNode::new(
-                Self::center_from_subnode(self.width, self.center, new_index),
-                self.width / PosStorage(2),
-                new_particle,
-            );
-            // Insert new particle
-            new_nodes[new_index] = Some(new_node);
+        if let OptionalMass::Particle(previous_particles) = &mut self.pseudoparticle
+            && previous_particles.push(new_particle)
+        {
+            return;
         }
-        new_nodes[previous_index] = Some(previous_node);
 
-        self.subnodes = Some(Box::new(new_nodes));
+        match &self.pseudoparticle {
+            OptionalMass::Particle(previous_particles) => {
+                let mut new_nodes: Subnodes<Self> = Default::default();
 
-        // If particles belong in the same cell, call insert on self so self can be subdivided again
-        if previous_index == new_index {
-            self.insert_particle(particles, new_particle, conv);
+                let new_index =
+                    Self::choose_subnode(&self.center, &particles.positions[new_particle]);
+                let new_node = Self::new(
+                    Self::center_from_subnode(self.width, self.center, new_index),
+                    self.width / PosStorage(2),
+                    new_particle,
+                );
+                // Insert new particle
+                new_nodes[new_index] = Some(new_node);
+
+                self.subnodes = Some(Box::new(new_nodes));
+
+                for &particle in previous_particles.clone().iter() {
+                    self.insert_particle(particles, particle, conv);
+                }
+
+                self.calculate_mass(particles, conv);
+            }
+            OptionalMass::Point(_) => {
+                unreachable_debug!("leaves without a particle shouldn't exist");
+            }
         }
-        self.calculate_mass(particles, conv);
     }
 }
 
-impl super::Node for ScalarNode {
+impl<const N: usize> super::Node for ScalarNode<N> {
     fn new(center: Vector3<PosStorage>, width: PosStorage, particle: usize) -> Self {
         Self {
             subnodes: None,
-            pseudoparticle: OptionalMass::Particle(particle),
+            pseudoparticle: OptionalMass::Particle(ParticleArray::from_particle(particle)),
             center,
             width,
         }
@@ -135,7 +191,7 @@ impl super::Node for ScalarNode {
                 match &mut subnodes[new_subnode] {
                     Some(subnode) => subnode.insert_particle(particles, particle, conv),
                     None => {
-                        subnodes[new_subnode] = Some(ScalarNode::new(
+                        subnodes[new_subnode] = Some(Self::new(
                             Self::center_from_subnode(self.width, self.center, new_subnode),
                             self.width / PosStorage(2),
                             particle,
@@ -147,10 +203,10 @@ impl super::Node for ScalarNode {
             }
 
             // Self is outer node
-            None => match self.pseudoparticle {
+            None => match &self.pseudoparticle {
                 // Self contains a particle, subdivide
-                OptionalMass::Particle(previous_particle) => {
-                    self.insert_particle_subdivide(particles, previous_particle, particle, conv);
+                OptionalMass::Particle(_) => {
+                    self.insert_particle_subdivide(particles, particle, conv);
                 }
 
                 OptionalMass::Point(_) => {
@@ -166,16 +222,14 @@ impl super::Node for ScalarNode {
                 .iter_mut()
                 .filter_map(|node| node.as_mut())
                 .map(|node| match &node.pseudoparticle {
-                    OptionalMass::Point(pseudo) => (&pseudo.mass, &pseudo.position),
-                    OptionalMass::Particle(par) => {
-                        (&particles.masses[*par], &particles.positions[*par])
-                    }
+                    OptionalMass::Point(pseudo) => (pseudo.mass, pseudo.position),
+                    OptionalMass::Particle(par) => par.center_of_mass(particles, conv),
                 })
-                .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (&m, pos)| {
+                .fold((0., Vector3::zeros()), |(m_acc, pos_acc), (m, pos)| {
                     let m_sum = m_acc + m;
                     (
                         m_sum,
-                        (pos_acc * m_acc + conv.pos_to_float_vec(*pos) * m) / m_sum,
+                        (pos_acc * m_acc + conv.pos_to_float_vec(pos) * m) / m_sum,
                     )
                 });
 
@@ -245,18 +299,20 @@ impl super::Node for ScalarNode {
                     }
                 }
             }
-            OptionalMass::Particle(index2) => {
-                if particles.positions[particle] == particles.positions[*index2] {
-                    return acc;
-                }
+            OptionalMass::Particle(arr) => {
+                for index2 in arr.iter() {
+                    if particles.positions[particle] == particles.positions[*index2] {
+                        continue;
+                    }
 
-                acc += gravity::acceleration(
-                    particles.positions[particle],
-                    particles.masses[*index2],
-                    particles.positions[*index2],
-                    epsilon,
-                    conv,
-                );
+                    acc += gravity::acceleration(
+                        particles.positions[particle],
+                        particles.masses[*index2],
+                        particles.positions[*index2],
+                        epsilon,
+                        conv,
+                    );
+                }
             }
         }
 
@@ -271,7 +327,11 @@ impl super::Node for ScalarNode {
                 }
             }
             None => match self.pseudoparticle {
-                OptionalMass::Particle(particle) => indices.push(particle),
+                OptionalMass::Particle(arr) => {
+                    for &particle in arr.iter() {
+                        indices.push(particle);
+                    }
+                }
                 OptionalMass::Point(_) => {
                     unreachable_debug!("node without subnodes, but point charge")
                 }
@@ -308,7 +368,7 @@ mod tests {
         let mut accs = vec![Vector3::zeros(); 2];
 
         let conv = PosConverter::new(10.);
-        let bh = BarnesHut::new(0.);
+        let bh = BarnesHut::<1>::new(0.);
         bh.calculate_accelerations(&particles, &mut accs, 0., false, &conv);
 
         assert_ulps_eq!(accs[0], -accs[1]);
@@ -321,15 +381,23 @@ mod tests {
         let ds = DirectSummation::new();
         let mut bf = Simulation::new(particles.clone(), ds, 0., 10.);
 
-        let bh = BarnesHut::new(0.);
-        let mut bh = Simulation::new(particles, bh, 0., 10.);
+        let bh = BarnesHut::<1>::new(0.);
+        let mut bh = Simulation::new(particles.clone(), bh, 0., 10.);
+
+        let bh2 = BarnesHut::<2>::new(0.);
+        let mut bh2 = Simulation::new(particles, bh2, 0., 10.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bf.step(&mut acc_single, 1., Step::Middle);
         let mut acc_multi = [Vector3::zeros(); 50];
         bh.step(&mut acc_multi, 1., Step::Middle);
+        let mut acc_multi2 = [Vector3::zeros(); 50];
+        bh2.step(&mut acc_multi2, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
+            assert_ulps_eq!(s, m);
+        }
+        for (s, m) in acc_single.into_iter().zip(acc_multi2) {
             assert_ulps_eq!(s, m);
         }
     }
