@@ -151,43 +151,54 @@ impl ShortRangeSolver for BarnesHutSimd {
             #[cfg(feature = "rayon")]
             Execution::RayonPool => {
                 let num_threads = rayon::current_num_threads();
+                let (tx_acc, rx_acc) = mpsc::channel();
+                let (tx_sort, rx_sort) = mpsc::channel();
                 let local_particles =
                     ScalarNode::divide_particles_to_threads(particles, num_threads);
 
-                let res = rayon::broadcast(|ctx| {
-                    let octree =
-                        SimdNode::from_indices(particles, &local_particles[ctx.index()], conv);
+                rayon::scope(|s| {
+                    for i in 0..num_threads {
+                        let tx_acc = &tx_acc;
+                        let tx_sort = &tx_sort;
+                        let local_particles = &local_particles[i];
 
-                    let sorted_indices = if sort {
-                        let mut sorted_indices = Vec::new();
-                        octree.depth_first_search(&mut sorted_indices);
-                        Some(sorted_indices)
-                    } else {
-                        None
-                    };
-                    let accelerations = (0..particles.len())
-                        .map(|p| {
-                            octree.calculate_acceleration(particles, p, epsilon, self.theta, conv)
-                        })
-                        .collect::<Vec<_>>();
+                        s.spawn(move |_| {
+                            let octree = SimdNode::from_indices(particles, local_particles, conv);
 
-                    (accelerations, sorted_indices)
+                            let acc: Vec<_> = (0..particles.len())
+                                .map(|p| {
+                                    octree.calculate_acceleration(
+                                        particles, p, epsilon, self.theta, conv,
+                                    )
+                                })
+                                .collect();
+                            tx_acc.send(acc).unwrap();
+
+                            if sort {
+                                let mut sorted_indices = Vec::new();
+                                octree.depth_first_search(&mut sorted_indices);
+                                tx_sort.send(sorted_indices).unwrap();
+                            }
+                        });
+                    }
                 });
 
-                for (acc, _) in &res {
-                    for (i, a) in acc.iter().enumerate() {
+                for (a1, a2) in accelerations.iter_mut().zip(rx_acc.iter().next().unwrap()) {
+                    *a1 = a2;
+                }
+
+                for acc in rx_acc.iter().take(num_threads - 1) {
+                    for (i, a) in acc.into_iter().enumerate() {
                         accelerations[i] += a;
                     }
                 }
 
                 if sort {
                     let mut sorted_indices = Vec::new();
-                    for (_, mut indices_loc) in res {
-                        if let Some(indices_loc) = &mut indices_loc {
-                            sorted_indices.append(indices_loc);
-                        }
+                    for mut indices_loc in rx_sort.iter().take(num_threads) {
+                        sorted_indices.append(&mut indices_loc);
                     }
-                    Some(sorted_indices) // TODO: more efficient
+                    Some(sorted_indices)
                 } else {
                     None
                 }
