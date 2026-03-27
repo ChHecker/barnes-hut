@@ -9,7 +9,7 @@ fn particles(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0);
 
     let mut group = c.benchmark_group("barnes hut particles");
-    for n_par in [100, 1_000, 10_000] {
+    for n_par in [100, 1_000, 10_000, 100_000] {
         let bh = BarnesHut::new(1.5);
         group.bench_with_input(BenchmarkId::new("scalar", n_par), &n_par, |b, &n_par| {
             b.iter_batched_ref(
