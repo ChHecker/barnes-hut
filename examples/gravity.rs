@@ -17,9 +17,8 @@ fn main() {
         })
         .collect::<Particles>();
 
-    let bh = BarnesHutSimd::new(1.5);
+    let bh = BarnesHutSimd::new(1.5).rayon_pool();
     let mut bh = Simulation::new(particles, bh, 1e-5, 10.).sorting(1);
-    // .multithreaded(4);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];
 

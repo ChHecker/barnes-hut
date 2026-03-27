@@ -13,7 +13,7 @@ fn main() {
     let pc = CentralBodyParticleCreator::new(1e10, uniform_mass, normal_rad, 10.);
 
     // Visualize.
-    let bh = BarnesHutSimd::new(0.);
+    let bh = BarnesHutSimd::new(0.).rayon_pool();
     let vis: Visualizer<BarnesHutSimd> =
         Visualizer::from_particle_creator(pc, bh, 2, 0., 1920, 1080).unwrap();
     vis.visualize(SPEED).unwrap();
