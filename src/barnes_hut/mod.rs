@@ -62,12 +62,21 @@ where
     {
         if indices.len() > 500 {
             let mut indices_sub = Self::split_indices_in_octants(indices, particles, center);
+            let mut nodes = Box::new([const { None }; 8]);
 
-            let nodes: Vec<Option<Self>> = indices_sub.par_iter_mut().enumerate().map(|(i, idx)| {
-                let center = Self::center_from_subnode(width, center, i);
-                Self::from_indices(center, width / PosStorage(2), particles, idx, conv)
-            }).collect();
-            let nodes: [Option<Self>; 8] = nodes.try_into().ok().unwrap();
+            nodes
+                .par_iter_mut()
+                .zip(indices_sub.par_iter_mut())
+                .enumerate()
+                .for_each(|(i, (node, idx))| {
+                    *node = Self::from_indices(
+                        Self::center_from_subnode(width, center, i),
+                        width / PosStorage(2),
+                        particles,
+                        idx,
+                        conv,
+                    );
+                });
 
             Some(Self::combine(nodes, center, width, particles, conv))
         } else {
@@ -99,7 +108,7 @@ where
     fn calculate_mass(&mut self, particles: &Particles, conv: &PosConverter);
 
     fn combine(
-        nodes: [Option<Self>; 8],
+        nodes: Box<[Option<Self>; 8]>,
         center: Vector3<PosStorage>,
         width: PosStorage,
         particles: &Particles,
@@ -145,7 +154,7 @@ where
         center: Vector3<PosStorage>,
         i: usize,
     ) -> Vector3<PosStorage> {
-        let step_size = width / PosStorage(2);
+        let step_size = width / PosStorage(4);
         let zero = Vector3::zeros();
         let mut x = zero;
         x.x = step_size;

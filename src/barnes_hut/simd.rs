@@ -33,21 +33,27 @@ impl ShortRangeSolver for BarnesHutSimd {
     ) -> Option<Vec<usize>> {
         let (center, width) = SimdNode::get_center_and_width();
 
+        let now = std::time::Instant::now();
         let octree = {
-            let mut indices: Box<[usize]> = (0..particles.len()).collect();
+            let mut indices: Vec<usize> = (0..particles.len()).collect();
             SimdNode::from_indices(center, width, particles, &mut indices, conv).unwrap()
         };
+        println!("tree construction: {}", now.elapsed().as_millis());
 
+        let now = std::time::Instant::now();
         accelerations
             .par_iter_mut()
             .enumerate()
             .for_each(|(i, acc)| {
                 *acc = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
             });
+        println!("tree traversal: {}", now.elapsed().as_millis());
 
         if sort {
+            let now = std::time::Instant::now();
             let mut sorted_indices = Vec::with_capacity(particles.len());
             octree.depth_first_search(&mut sorted_indices);
+            println!("tree dfs: {}", now.elapsed().as_millis());
             Some(sorted_indices)
         } else {
             None
@@ -262,14 +268,14 @@ impl super::Node for SimdNode {
     }
 
     fn combine(
-        nodes: [Option<Self>; 8],
+        nodes: Box<[Option<Self>; 8]>,
         center: Vector3<PosStorage>,
         width: PosStorage,
         particles: &Particles,
         conv: &PosConverter,
     ) -> Self {
         let mut ret = Self {
-            subnodes: Some(Box::new(nodes)),
+            subnodes: Some(nodes),
             pseudoparticle: OptionalMass::Point(PointMass {
                 mass: 0.,
                 position: Vector3::zeros(),
