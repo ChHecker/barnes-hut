@@ -18,7 +18,7 @@ fn main() {
     let pc = DistrParticleCreator::rng(uniform_mass, normal_pos, normal_vel, rng);
 
     // Visualize.
-    let bh = BarnesHutSimd::new(1.5).rayon_pool();
+    let bh = BarnesHutSimd::new(1.5);
     let vis = Visualizer::from_particle_creator(pc, bh, 100, epsilon, 1000, 1000).unwrap();
     vis.visualize(SPEED).unwrap();
 }

@@ -1,10 +1,9 @@
-use std::{ops::Deref, sync::mpsc, thread};
+use std::ops::Deref;
 
 use nalgebra::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
-#[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use super::{Execution, Node, Particles, PointMass, ScalarNode, Subnodes, Vector3};
+use super::{Node, Particles, PointMass, Subnodes, Vector3};
 use crate::{
     ShortRangeSolver, gravity,
     particles::{PosConverter, PosStorage, SimdPosStorage},
@@ -14,47 +13,12 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub struct BarnesHutSimd {
     theta: f32,
-    execution: Execution,
 }
 
 impl BarnesHutSimd {
     #[must_use]
     pub fn new(theta: f32) -> Self {
-        Self {
-            theta,
-            execution: Execution::SingleThreaded,
-        }
-    }
-
-    /// Calculate the forces with multiple threads.
-    ///
-    /// Every thread gets its own tree with a part of the particles
-    /// and calculates for all particles the forces from its own tree.
-    #[must_use]
-    pub fn multithreaded(mut self, num_threads: usize) -> Self {
-        self.execution = Execution::Multithreaded { num_threads };
-        self
-    }
-
-    /// Use Rayon to calculate the forces with multiple threads.
-    ///
-    /// All threads calculate the forces from the shared tree, splitting the particles.
-    #[cfg(feature = "rayon")]
-    #[must_use]
-    pub fn rayon_iter(mut self) -> Self {
-        self.execution = Execution::RayonIter;
-        self
-    }
-
-    /// Use Rayon to calculate the forces with multiple threads.
-    ///
-    /// Every thread gets its own tree with a part of the particles
-    /// and calculates for all particles the forces from its own tree.
-    #[cfg(feature = "rayon")]
-    #[must_use]
-    pub fn rayon_pool(mut self) -> Self {
-        self.execution = Execution::RayonPool;
-        self
+        Self { theta }
     }
 }
 
@@ -67,131 +31,26 @@ impl ShortRangeSolver for BarnesHutSimd {
         sort: bool,
         conv: &PosConverter,
     ) -> Option<Vec<usize>> {
-        match self.execution {
-            Execution::SingleThreaded => {
-                let octree = SimdNode::from_particles(particles, conv);
-                accelerations.iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
-                });
-                if sort {
-                    let mut sorted_indices = Vec::new();
-                    octree.depth_first_search(&mut sorted_indices);
-                    Some(sorted_indices)
-                } else {
-                    None
-                }
-            }
-            Execution::Multithreaded { num_threads } => {
-                let (tx_acc, rx_acc) = mpsc::channel();
-                let (tx_sort, rx_sort) = mpsc::channel();
-                let local_particles =
-                    ScalarNode::divide_particles_to_threads(particles, num_threads);
+        let (center, width) = SimdNode::get_center_and_width();
 
-                thread::scope(|s| {
-                    for i in 0..num_threads {
-                        let tx_acc = &tx_acc;
-                        let tx_sort = &tx_sort;
-                        let local_particles = &local_particles[i];
+        let octree = {
+            let mut indices: Box<[usize]> = (0..particles.len()).collect();
+            SimdNode::from_indices(center, width, particles, &mut indices, conv).unwrap()
+        };
 
-                        s.spawn(move || {
-                            let octree = SimdNode::from_indices(particles, local_particles, conv);
+        accelerations
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, acc)| {
+                *acc = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
+            });
 
-                            let acc: Vec<_> = (0..particles.len())
-                                .map(|p| {
-                                    octree.calculate_acceleration(
-                                        particles, p, epsilon, self.theta, conv,
-                                    )
-                                })
-                                .collect();
-                            tx_acc.send(acc).unwrap();
-
-                            if sort {
-                                let mut sorted_indices = Vec::new();
-                                octree.depth_first_search(&mut sorted_indices);
-                                tx_sort.send(sorted_indices).unwrap();
-                            }
-                        });
-                    }
-                });
-
-                for (a1, a2) in accelerations.iter_mut().zip(rx_acc.iter().next().unwrap()) {
-                    *a1 = a2;
-                }
-
-                for acc in rx_acc.iter().take(num_threads - 1) {
-                    for (i, a) in acc.into_iter().enumerate() {
-                        accelerations[i] += a;
-                    }
-                }
-
-                if sort {
-                    let mut sorted_indices = Vec::new();
-                    for mut indices_loc in rx_sort.iter().take(num_threads) {
-                        sorted_indices.append(&mut indices_loc);
-                    }
-                    Some(sorted_indices)
-                } else {
-                    None
-                }
-            }
-            #[cfg(feature = "rayon")]
-            Execution::RayonIter => {
-                let octree = SimdNode::from_particles(particles, conv);
-                accelerations.par_iter_mut().enumerate().for_each(|(i, a)| {
-                    *a = octree.calculate_acceleration(particles, i, epsilon, self.theta, conv);
-                });
-                if sort {
-                    let mut sorted_indices = Vec::new();
-                    octree.depth_first_search(&mut sorted_indices);
-                    Some(sorted_indices)
-                } else {
-                    None
-                }
-            }
-            #[cfg(feature = "rayon")]
-            Execution::RayonPool => {
-                let num_threads = rayon::current_num_threads();
-                let local_particles =
-                    ScalarNode::divide_particles_to_threads(particles, num_threads);
-
-                let res = rayon::broadcast(|ctx| {
-                    let octree =
-                        SimdNode::from_indices(particles, &local_particles[ctx.index()], conv);
-
-                    let sorted_indices = if sort {
-                        let mut sorted_indices = Vec::new();
-                        octree.depth_first_search(&mut sorted_indices);
-                        Some(sorted_indices)
-                    } else {
-                        None
-                    };
-                    let accelerations = (0..particles.len())
-                        .map(|p| {
-                            octree.calculate_acceleration(particles, p, epsilon, self.theta, conv)
-                        })
-                        .collect::<Vec<_>>();
-
-                    (accelerations, sorted_indices)
-                });
-
-                for (acc, _) in &res {
-                    for (i, a) in acc.iter().enumerate() {
-                        accelerations[i] += a;
-                    }
-                }
-
-                if sort {
-                    let mut sorted_indices = Vec::new();
-                    for (_, mut indices_loc) in res {
-                        if let Some(indices_loc) = &mut indices_loc {
-                            sorted_indices.append(indices_loc);
-                        }
-                    }
-                    Some(sorted_indices) // TODO: more efficient
-                } else {
-                    None
-                }
-            }
+        if sort {
+            let mut sorted_indices = Vec::with_capacity(particles.len());
+            octree.depth_first_search(&mut sorted_indices);
+            Some(sorted_indices)
+        } else {
+            None
         }
     }
 }
@@ -402,6 +261,26 @@ impl super::Node for SimdNode {
         }
     }
 
+    fn combine(
+        nodes: [Option<Self>; 8],
+        center: Vector3<PosStorage>,
+        width: PosStorage,
+        particles: &Particles,
+        conv: &PosConverter,
+    ) -> Self {
+        let mut ret = Self {
+            subnodes: Some(Box::new(nodes)),
+            pseudoparticle: OptionalMass::Point(PointMass {
+                mass: 0.,
+                position: Vector3::zeros(),
+            }),
+            center,
+            width,
+        };
+        ret.calculate_mass(particles, conv);
+        ret
+    }
+
     fn calculate_acceleration(
         &self,
         particles: &Particles,
@@ -491,7 +370,7 @@ impl super::Node for SimdNode {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_ulps_eq;
+    use approx::assert_relative_eq;
 
     use super::*;
     use crate::{Simulation, Step, direct_summation::DirectSummation, generate_random_particles};
@@ -512,12 +391,12 @@ mod tests {
         let bh = BarnesHutSimd::new(0.);
         bh.calculate_accelerations(&particles, &mut accs, 0., false, &conv);
 
-        assert_ulps_eq!(accs[0], -accs[1]);
+        assert_relative_eq!(accs[0], -accs[1]);
     }
 
     #[test]
     fn brute_force() {
-        let particles = generate_random_particles(50);
+        let particles = generate_random_particles(1000);
 
         let ds = DirectSummation::new();
         let mut bf = Simulation::new(particles.clone(), ds, 0., 10.);
@@ -531,45 +410,7 @@ mod tests {
         bh.step(&mut acc_multi, 1., Step::Middle);
 
         for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_ulps_eq!(s, m);
-        }
-    }
-
-    #[test]
-    fn multithreaded() {
-        let particles = generate_random_particles(50);
-
-        let bh = BarnesHutSimd::new(0.);
-        let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
-        let bh = BarnesHutSimd::new(0.).multithreaded(2);
-        let mut bh_multi = Simulation::new(particles, bh, 0., 10.);
-
-        let mut acc_single = [Vector3::zeros(); 50];
-        bh_single.step(&mut acc_single, 1., Step::Middle);
-        let mut acc_multi = [Vector3::zeros(); 50];
-        bh_multi.step(&mut acc_multi, 1., Step::Middle);
-
-        for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_ulps_eq!(s, m);
-        }
-    }
-
-    #[test]
-    fn rayon() {
-        let particles = generate_random_particles(50);
-
-        let bh = BarnesHutSimd::new(0.);
-        let mut bh_single = Simulation::new(particles.clone(), bh, 0., 10.);
-        let bh = BarnesHutSimd::new(0.).rayon_iter();
-        let mut bh_rayon = Simulation::new(particles, bh, 0., 10.);
-
-        let mut acc_single = [Vector3::zeros(); 50];
-        bh_single.step(&mut acc_single, 1., Step::Middle);
-        let mut acc_multi = [Vector3::zeros(); 50];
-        bh_rayon.step(&mut acc_multi, 1., Step::Middle);
-
-        for (s, m) in acc_single.into_iter().zip(acc_multi) {
-            assert_ulps_eq!(s, m);
+            assert_relative_eq!(s, m, epsilon = 1e-5, max_relative = 1e-5);
         }
     }
 }

@@ -14,6 +14,8 @@ macro_rules! unreachable_debug {
     };
 }
 
+use rayon::prelude::*;
+
 mod scalar;
 pub use scalar::*;
 
@@ -26,19 +28,6 @@ use crate::{
     Particles,
     particles::{PosConverter, PosStorage},
 };
-
-#[derive(Copy, Clone, Debug, Default)]
-pub enum Execution {
-    #[default]
-    SingleThreaded,
-    Multithreaded {
-        num_threads: usize,
-    },
-    #[cfg(feature = "rayon")]
-    RayonIter,
-    #[cfg(feature = "rayon")]
-    RayonPool,
-}
 
 #[derive(Clone, Debug)]
 struct PointMass {
@@ -61,33 +50,38 @@ where
 {
     fn new(center: Vector3<PosStorage>, width: PosStorage, index: usize) -> Self;
 
-    fn from_particles(particles: &Particles, conv: &PosConverter) -> Self {
-        let (center, width) = Self::get_center_and_width();
+    fn from_indices(
+        center: Vector3<PosStorage>,
+        width: PosStorage,
+        particles: &Particles,
+        indices: &mut [usize],
+        conv: &PosConverter,
+    ) -> Option<Self>
+    where
+        Self: Send,
+    {
+        if indices.len() > 500 {
+            let mut indices_sub = Self::split_indices_in_octants(indices, particles, center);
 
-        let mut node = Self::new(center, width, 0);
+            let nodes: Vec<Option<Self>> = indices_sub.par_iter_mut().enumerate().map(|(i, idx)| {
+                let center = Self::center_from_subnode(width, center, i);
+                Self::from_indices(center, width / PosStorage(2), particles, idx, conv)
+            }).collect();
+            let nodes: [Option<Self>; 8] = nodes.try_into().ok().unwrap();
 
-        for i in 1..particles.len() {
-            node.insert_particle(particles, i, conv);
+            Some(Self::combine(nodes, center, width, particles, conv))
+        } else {
+            let mut iter = indices.iter();
+            let mut node = Self::new(center, width, *iter.next()?);
+
+            for &i in iter {
+                node.insert_particle(particles, i, conv);
+            }
+
+            node.calculate_mass(particles, conv);
+
+            Some(node)
         }
-
-        node.calculate_mass(particles, conv);
-
-        node
-    }
-
-    fn from_indices(particles: &Particles, indices: &[usize], conv: &PosConverter) -> Self {
-        let (center, width) = Self::get_center_and_width();
-
-        let mut iter = indices.iter();
-        let mut node = Self::new(center, width, *iter.next().unwrap());
-
-        for &i in iter {
-            node.insert_particle(particles, i, conv);
-        }
-
-        node.calculate_mass(particles, conv);
-
-        node
     }
 
     fn get_center_and_width() -> (Vector3<PosStorage>, PosStorage) {
@@ -103,6 +97,14 @@ where
     fn insert_particle(&mut self, particles: &Particles, index: usize, conv: &PosConverter);
 
     fn calculate_mass(&mut self, particles: &Particles, conv: &PosConverter);
+
+    fn combine(
+        nodes: [Option<Self>; 8],
+        center: Vector3<PosStorage>,
+        width: PosStorage,
+        particles: &Particles,
+        conv: &PosConverter,
+    ) -> Self;
 
     fn calculate_acceleration(
         &self,
@@ -165,19 +167,47 @@ where
         }
     }
 
-    fn divide_particles_to_threads(particles: &Particles, num_threads: usize) -> Vec<Vec<usize>> {
-        if num_threads > 8 {
-            unimplemented!()
+    fn split_indices_in_octants<'a>(
+        indices: &'a mut [usize],
+        particles: &Particles,
+        center: Vector3<PosStorage>,
+    ) -> [&'a mut [usize]; 8] {
+        let (z_neg, z_pos) = Self::split_indices_in_half(indices, particles, center[2], 2);
+
+        let (z_pos_y_neg, z_pos_y_pos) =
+            Self::split_indices_in_half(z_pos, particles, center[1], 1);
+        let (z_neg_y_neg, z_neg_y_pos) =
+            Self::split_indices_in_half(z_neg, particles, center[1], 1);
+
+        let (idx_1, idx_0) = Self::split_indices_in_half(z_pos_y_pos, particles, center[0], 0);
+        let (idx_2, idx_3) = Self::split_indices_in_half(z_pos_y_neg, particles, center[0], 0);
+        let (idx_5, idx_4) = Self::split_indices_in_half(z_neg_y_pos, particles, center[0], 0);
+        let (idx_6, idx_7) = Self::split_indices_in_half(z_neg_y_neg, particles, center[0], 0);
+
+        [idx_0, idx_1, idx_2, idx_3, idx_4, idx_5, idx_6, idx_7]
+    }
+
+    fn split_indices_in_half<'a>(
+        indices: &'a mut [usize],
+        particles: &Particles,
+        center: PosStorage,
+        axis: usize,
+    ) -> (&'a mut [usize], &'a mut [usize]) {
+        let mut left = 0;
+        let mut right = indices.len();
+
+        while left < right {
+            let pos = particles.positions[indices[left]][axis];
+
+            if pos < center {
+                left += 1;
+            } else {
+                right -= 1;
+                indices.swap(left, right);
+            }
         }
 
-        let (center, _) = Self::get_center_and_width();
-        let mut local_particles: Vec<Vec<usize>> = vec![Vec::new(); num_threads];
-        for i in 0..particles.len() {
-            let subnode = Self::choose_subnode(&center, &particles.positions[i]);
-            let subnode = subnode % num_threads;
-            local_particles[subnode].push(i);
-        }
-        local_particles
+        indices.split_at_mut(left)
     }
 
     fn depth_first_search(&self, indices: &mut Vec<usize>);
