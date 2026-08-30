@@ -1,10 +1,10 @@
 use std::{sync::mpsc, thread};
 
 use nalgebra::Vector3;
-#[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::{Particles, ShortRangeSolver, gravity, particles::PosConverter};
+use crate::particles::PosConverter;
+use crate::{Particles, ShortRangeSolver, gravity};
 
 #[derive(Copy, Clone, Debug, Default)]
 pub enum Execution {
@@ -13,9 +13,7 @@ pub enum Execution {
     Multithreaded {
         num_threads: usize,
     },
-    #[cfg(feature = "rayon")]
     RayonIter,
-    #[cfg(feature = "rayon")]
     RayonPool,
 }
 
@@ -45,7 +43,6 @@ impl DirectSummation {
     /// Use Rayon to calculate the forces with multiple threads.
     ///
     /// All threads calculate the forces from the shared tree, splitting the particles.
-    #[cfg(feature = "rayon")]
     #[must_use]
     pub fn rayon_iter(mut self) -> Self {
         self.execution = Execution::RayonIter;
@@ -56,7 +53,6 @@ impl DirectSummation {
     ///
     /// Every thread gets its own tree with a part of the particles
     /// and calculates for all particles the forces from its own tree.
-    #[cfg(feature = "rayon")]
     #[must_use]
     pub fn rayon_pool(mut self) -> Self {
         self.execution = Execution::RayonPool;
@@ -64,14 +60,14 @@ impl DirectSummation {
     }
 }
 
-impl ShortRangeSolver for DirectSummation {
+impl<C: PosConverter> ShortRangeSolver<C> for DirectSummation {
     fn calculate_accelerations(
         &self,
-        particles: &Particles,
+        particles: &Particles<C::PosStorage>,
         accelerations: &mut [Vector3<f32>],
         epsilon: f32,
         _sort: bool,
-        conv: &PosConverter,
+        conv: &C,
     ) -> Option<Vec<usize>> {
         match self.execution {
             Execution::SingleThreaded => {
@@ -135,7 +131,6 @@ impl ShortRangeSolver for DirectSummation {
                     }
                 }
             }
-            #[cfg(feature = "rayon")]
             Execution::RayonIter => {
                 accelerations
                     .par_iter_mut()
@@ -161,7 +156,6 @@ impl ShortRangeSolver for DirectSummation {
                         }
                     });
             }
-            #[cfg(feature = "rayon")]
             Execution::RayonPool => {
                 let num_threads = rayon::current_num_threads();
 
@@ -208,6 +202,7 @@ mod tests {
     use approx::assert_ulps_eq;
 
     use super::*;
+    use crate::particles::{IntPosConverter, PosStorage};
     use crate::*;
 
     #[test]
@@ -222,7 +217,7 @@ mod tests {
         let particles = Particles::new(masses, positions, velocities);
         let mut accs = vec![Vector3::zeros(); 2];
 
-        let conv = PosConverter::new(10.);
+        let conv = IntPosConverter::new(10.);
         let ds = DirectSummation::new();
         ds.calculate_accelerations(&particles, &mut accs, 0., false, &conv);
 
@@ -232,11 +227,12 @@ mod tests {
     #[test]
     fn multithreaded() {
         let particles = generate_random_particles(50);
+        let conv = IntPosConverter::new(10.);
 
         let ds = DirectSummation::new();
-        let mut bh_single = Simulation::new(particles.clone(), ds, 0., 10.);
+        let mut bh_single = Simulation::new(particles.clone(), ds, conv, 0.);
         let ds = DirectSummation::new().multithreaded(2);
-        let mut bh_multi = Simulation::new(particles, ds, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, ds, conv, 0.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -251,11 +247,12 @@ mod tests {
     #[test]
     fn rayon_iter() {
         let particles = generate_random_particles(50);
+        let conv = IntPosConverter::new(10.);
 
         let ds = DirectSummation::new();
-        let mut bh_single = Simulation::new(particles.clone(), ds, 0., 10.);
+        let mut bh_single = Simulation::new(particles.clone(), ds, conv, 0.);
         let ds = DirectSummation::new().rayon_iter();
-        let mut bh_multi = Simulation::new(particles, ds, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, ds, conv, 0.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);
@@ -270,11 +267,12 @@ mod tests {
     #[test]
     fn rayon_pool() {
         let particles = generate_random_particles(50);
+        let conv = IntPosConverter::new(10.);
 
         let ds = DirectSummation::new();
-        let mut bh_single = Simulation::new(particles.clone(), ds, 0., 10.);
+        let mut bh_single = Simulation::new(particles.clone(), ds, conv, 0.);
         let ds = DirectSummation::new().rayon_pool();
-        let mut bh_multi = Simulation::new(particles, ds, 0., 10.);
+        let mut bh_multi = Simulation::new(particles, ds, conv, 0.);
 
         let mut acc_single = [Vector3::zeros(); 50];
         bh_single.step(&mut acc_single, 1., Step::Middle);

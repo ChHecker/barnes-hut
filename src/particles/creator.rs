@@ -1,16 +1,16 @@
-pub trait ParticleCreator {
-    fn create_particle(&mut self) -> (f32, Vector3<PosStorage>, Vector3<f32>);
+pub trait ParticleCreator<P: Scalar> {
+    fn create_particle(&mut self) -> (f32, Vector3<P>, Vector3<f32>);
 
-    fn create_particles(&mut self, n: u32) -> Particles {
+    fn create_particles(&mut self, n: u32) -> Particles<P> {
         (0..n).map(|_| self.create_particle()).collect()
     }
 }
 
-use nalgebra::Vector3;
+use nalgebra::{Scalar, Vector3};
 #[cfg(feature = "randomization")]
 pub use random::*;
 
-use crate::{Particles, particles::PosStorage};
+use crate::Particles;
 
 #[cfg(feature = "randomization")]
 mod random {
@@ -24,69 +24,83 @@ mod random {
     use rand_distr::{Distribution, Uniform};
 
     use super::*;
-    use crate::{gravity::G, particles::PosConverter};
+    use crate::gravity::G;
+    use crate::particles::PosConverter;
 
-    pub struct DistrParticleCreator<R, MD, PD, VD>
+    pub struct DistrParticleCreator<'a, C, R, MD, PD, VD>
     where
+        C: PosConverter,
         R: Rng,
         MD: Distribution<f32>,
-        PD: Distribution<u32>,
+        PD: Distribution<f32>,
         VD: Distribution<f32>,
     {
         rng: R,
         mass_distr: MD,
         position_distr: PD,
         velocity_distr: VD,
+        conv: &'a C,
     }
 
-    impl<PD, VD, MD> DistrParticleCreator<ThreadRng, MD, PD, VD>
+    impl<'a, C, PD, VD, MD> DistrParticleCreator<'a, C, ThreadRng, MD, PD, VD>
     where
+        C: PosConverter,
         MD: Distribution<f32>,
-        PD: Distribution<u32>,
+        PD: Distribution<f32>,
         VD: Distribution<f32>,
     {
-        pub fn new(mass_distr: MD, position_distr: PD, velocity_distr: VD) -> Self {
+        pub fn new(mass_distr: MD, position_distr: PD, velocity_distr: VD, conv: &'a C) -> Self {
             Self {
                 rng: rand::rng(),
                 mass_distr,
                 position_distr,
                 velocity_distr,
+                conv,
             }
         }
     }
 
-    impl<R, PD, VD, MD> DistrParticleCreator<R, MD, PD, VD>
+    impl<'a, C, R, PD, VD, MD> DistrParticleCreator<'a, C, R, MD, PD, VD>
     where
+        C: PosConverter,
         R: Rng,
         MD: Distribution<f32>,
-        PD: Distribution<u32>,
+        PD: Distribution<f32>,
         VD: Distribution<f32>,
     {
-        pub fn rng(mass_distr: MD, position_distr: PD, velocity_distr: VD, rng: R) -> Self {
+        pub fn rng(
+            mass_distr: MD,
+            position_distr: PD,
+            velocity_distr: VD,
+            rng: R,
+            conv: &'a C,
+        ) -> Self {
             Self {
                 rng,
                 mass_distr,
                 position_distr,
                 velocity_distr,
+                conv,
             }
         }
     }
 
-    impl<R, PD, VD, MD> ParticleCreator for DistrParticleCreator<R, MD, PD, VD>
+    impl<'a, C, R, PD, VD, MD> ParticleCreator<C::PosStorage> for DistrParticleCreator<'a, C, R, MD, PD, VD>
     where
+        C: PosConverter,
         R: Rng,
         MD: Distribution<f32>,
-        PD: Distribution<u32>,
+        PD: Distribution<f32>,
         VD: Distribution<f32>,
     {
-        fn create_particle(&mut self) -> (f32, Vector3<PosStorage>, Vector3<f32>) {
+        fn create_particle(&mut self) -> (f32, Vector3<C::PosStorage>, Vector3<f32>) {
             let rng = &mut self.rng;
 
             let m = self.mass_distr.sample(rng);
             let pos = Vector3::new(
-                PosStorage(self.position_distr.sample(rng)),
-                PosStorage(self.position_distr.sample(rng)),
-                PosStorage(self.position_distr.sample(rng)),
+                self.conv.float_to_pos(self.position_distr.sample(rng)),
+                self.conv.float_to_pos(self.position_distr.sample(rng)),
+                self.conv.float_to_pos(self.position_distr.sample(rng)),
             );
             let vel = Vector3::new(
                 self.velocity_distr.sample(rng),
@@ -99,8 +113,9 @@ mod random {
     }
 
     #[derive(Clone)]
-    pub struct CentralBodyParticleCreator<MD, RD>
+    pub struct CentralBodyParticleCreator<'a, C, MD, RD>
     where
+        C: PosConverter,
         MD: Distribution<f32>,
         RD: Distribution<f32>,
     {
@@ -109,17 +124,23 @@ mod random {
         mass_distr: MD,
         radial_distr: RD,
         first_par: bool,
-        conv: PosConverter,
         box_size: f32,
+        conv: &'a C,
     }
 
-    impl<MD, RD> CentralBodyParticleCreator<MD, RD>
+    impl<'a, C, MD, RD> CentralBodyParticleCreator<'a, C, MD, RD>
     where
+        C: PosConverter,
         MD: Distribution<f32>,
         RD: Distribution<f32>,
     {
-        pub fn new(central_mass: f32, mass_distr: MD, radial_distr: RD, box_size: f32) -> Self {
-            let conv = PosConverter::new(box_size);
+        pub fn new(
+            central_mass: f32,
+            mass_distr: MD,
+            radial_distr: RD,
+            box_size: f32,
+            conv: &'a C,
+        ) -> Self {
             Self {
                 rng: rand::rng(),
                 central_mass,
@@ -132,18 +153,19 @@ mod random {
         }
     }
 
-    impl<MD, RD> ParticleCreator for CentralBodyParticleCreator<MD, RD>
+    impl<'a, C, MD, RD> ParticleCreator<C::PosStorage> for CentralBodyParticleCreator<'a, C, MD, RD>
     where
+        C: PosConverter,
         MD: Distribution<f32>,
         RD: Distribution<f32>,
     {
-        fn create_particle(&mut self) -> (f32, Vector3<PosStorage>, Vector3<f32>) {
+        fn create_particle(&mut self) -> (f32, Vector3<C::PosStorage>, Vector3<f32>) {
             if self.first_par {
                 self.first_par = false;
 
                 return (
                     self.central_mass,
-                    Vector3::from_element(PosStorage(u32::MAX / 2)),
+                    Vector3::from_element(self.conv.float_to_pos(self.box_size / 2.)),
                     Vector3::zeros(),
                 );
             }
@@ -168,22 +190,25 @@ mod random {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::particles::IntPosConverter;
         use crate::{Simulation, barnes_hut::BarnesHut};
 
         #[test]
         fn test_central_body() {
             let num_steps = 1000;
 
+            let conv = IntPosConverter::new(10.);
             let mut pc = CentralBodyParticleCreator::new(
                 1e10,
                 Uniform::new(100., 100.1).unwrap(),
                 Uniform::new(1., 1.1).unwrap(),
                 10.,
+                &conv,
             );
             let par = pc.create_particles(2);
 
             let bh = BarnesHut::<1>::new(0.);
-            let mut bh = Simulation::new(par, bh, 0., 10.);
+            let mut bh = Simulation::new(par, bh, conv, 0.);
             let pos = bh.simulate(0.1, num_steps);
 
             let last = pos.row(num_steps);

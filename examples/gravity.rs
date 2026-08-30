@@ -1,6 +1,6 @@
 use barnes_hut::barnes_hut::BarnesHut;
-use barnes_hut::particles::PosConverter;
-use barnes_hut::{Particles, Simulation, Sorting, Step, barnes_hut::BarnesHutSimd};
+use barnes_hut::particles::IntPosConverter;
+use barnes_hut::{Particles, Simulation, Sorting, Step};
 
 use nalgebra::Vector3;
 use rand::prelude::*;
@@ -8,7 +8,7 @@ use rand_distr::{Distribution, Normal};
 
 fn main() {
     let mut rng = StdRng::seed_from_u64(0);
-    let conv = PosConverter::new(10.);
+    let conv = IntPosConverter::new(10.);
 
     let num_pars = 1_000_000;
     let box_size = 10.;
@@ -46,7 +46,7 @@ fn main() {
         })
         .collect::<Particles>();
 
-    let bh = BarnesHut::<1>::new(1.5);
+    let bh = BarnesHut::<1>::new(1.5).simd();
     let mut bh = Simulation::new(particles, bh, 1e-5, box_size).sorting(1);
 
     let mut acceleration = vec![Vector3::zeros(); num_pars];

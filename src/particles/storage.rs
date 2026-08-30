@@ -1,7 +1,7 @@
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 
-use nalgebra::{SimdValue, Vector3};
-use num_traits::{One, Zero};
+use nalgebra::{Scalar, SimdValue, Vector3};
+use num_traits::{Num, NumAssign, One, Zero};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PosStorage(pub u32);
@@ -98,6 +98,28 @@ impl DivAssign<PosStorage> for PosStorage {
     }
 }
 
+impl Rem<PosStorage> for PosStorage {
+    type Output = Self;
+
+    fn rem(self, rhs: PosStorage) -> Self::Output {
+        PosStorage(self.0 % rhs.0)
+    }
+}
+
+impl RemAssign<PosStorage> for PosStorage {
+    fn rem_assign(&mut self, rhs: PosStorage) {
+        self.0 %= rhs.0;
+    }
+}
+
+impl Num for PosStorage {
+    type FromStrRadixErr = <u32 as Num>::FromStrRadixErr;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        Ok(Self(u32::from_str_radix(str, radix)?))
+    }
+}
+
 impl SimdValue for PosStorage {
     const LANES: usize = 1;
     type Element = PosStorage;
@@ -134,13 +156,37 @@ impl SimdValue for PosStorage {
     }
 }
 
+pub trait PosConverter: Send + Sync {
+    type PosStorage: Scalar + SimdValue + NumAssign + PartialOrd + Copy + Send + Sync;
+
+    fn box_size(&self) -> Self::PosStorage;
+
+    fn center(&self) -> Vector3<Self::PosStorage>;
+
+    fn pos_to_float(&self, pos: Self::PosStorage) -> f32;
+
+    fn float_to_pos(&self, pos: f32) -> Self::PosStorage;
+
+    fn pos_to_float_vec(&self, pos: Vector3<Self::PosStorage>) -> Vector3<f32>;
+
+    fn float_to_pos_vec(&self, pos: Vector3<f32>) -> Vector3<Self::PosStorage>;
+
+    fn distance(
+        &self,
+        pos1: Vector3<Self::PosStorage>,
+        pos2: Vector3<Self::PosStorage>,
+    ) -> Vector3<f32>;
+
+    fn add_float_to_pos(&self, pos: &mut Vector3<Self::PosStorage>, rhs: Vector3<f32>) -> bool;
+}
+
 #[derive(Clone, Copy, Debug)]
-pub struct PosConverter {
+pub struct IntPosConverter {
     float_to_int: f32,
     int_to_float: f32,
 }
 
-impl PosConverter {
+impl IntPosConverter {
     #[must_use]
     pub fn new(box_size: f32) -> Self {
         let float_to_int = 2usize.pow(32) as f32 / box_size;
@@ -150,24 +196,40 @@ impl PosConverter {
             int_to_float,
         }
     }
+}
 
-    pub fn pos_to_float(&self, pos: PosStorage) -> f32 {
+impl PosConverter for IntPosConverter {
+    type PosStorage = PosStorage;
+
+    fn box_size(&self) -> Self::PosStorage {
+        PosStorage(u32::MAX)
+    }
+
+    fn center(&self) -> Vector3<Self::PosStorage> {
+        Vector3::new(
+            PosStorage(u32::MAX / 2),
+            PosStorage(u32::MAX / 2),
+            PosStorage(u32::MAX / 2),
+        )
+    }
+
+    fn pos_to_float(&self, pos: PosStorage) -> f32 {
         pos.to_float(self.int_to_float)
     }
 
-    pub fn float_to_pos(&self, pos: f32) -> PosStorage {
+    fn float_to_pos(&self, pos: f32) -> PosStorage {
         PosStorage::from_float(pos, self.float_to_int)
     }
 
-    pub fn pos_to_float_vec(&self, pos: Vector3<PosStorage>) -> Vector3<f32> {
+    fn pos_to_float_vec(&self, pos: Vector3<PosStorage>) -> Vector3<f32> {
         pos.map(|pos| self.pos_to_float(pos))
     }
 
-    pub fn float_to_pos_vec(&self, pos: Vector3<f32>) -> Vector3<PosStorage> {
+    fn float_to_pos_vec(&self, pos: Vector3<f32>) -> Vector3<PosStorage> {
         pos.map(|pos| self.float_to_pos(pos))
     }
 
-    pub fn distance(&self, pos1: Vector3<PosStorage>, pos2: Vector3<PosStorage>) -> Vector3<f32> {
+    fn distance(&self, pos1: Vector3<PosStorage>, pos2: Vector3<PosStorage>) -> Vector3<f32> {
         Vector3::from_iterator((0..3).map(|i| {
             if pos1[i] >= pos2[i] {
                 let delta = pos1[i] - pos2[i];
@@ -179,7 +241,7 @@ impl PosConverter {
         }))
     }
 
-    pub fn add_float_to_pos(&self, pos: &mut Vector3<PosStorage>, rhs: Vector3<f32>) -> bool {
+    fn add_float_to_pos(&self, pos: &mut Vector3<PosStorage>, rhs: Vector3<f32>) -> bool {
         for i in 0..3 {
             if rhs[i] >= 0. {
                 match pos[i].checked_add(self.float_to_pos(rhs[i])) {
@@ -198,15 +260,90 @@ impl PosConverter {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct FloatPosConverter {
+    pub box_size: f32,
+}
+
+impl FloatPosConverter {
+    pub fn new(box_size: f32) -> Self {
+        Self { box_size }
+    }
+}
+
+impl PosConverter for FloatPosConverter {
+    type PosStorage = f32;
+
+    fn box_size(&self) -> Self::PosStorage {
+        self.box_size
+    }
+
+    fn center(&self) -> Vector3<Self::PosStorage> {
+        Vector3::new(self.box_size / 2., self.box_size / 2., self.box_size / 2.)
+    }
+
+    #[inline(always)]
+    fn pos_to_float(&self, pos: f32) -> f32 {
+        pos
+    }
+
+    #[inline(always)]
+    fn float_to_pos(&self, pos: f32) -> f32 {
+        pos
+    }
+
+    #[inline(always)]
+    fn pos_to_float_vec(&self, pos: Vector3<f32>) -> Vector3<f32> {
+        pos
+    }
+
+    #[inline(always)]
+    fn float_to_pos_vec(&self, pos: Vector3<f32>) -> Vector3<f32> {
+        pos
+    }
+
+    fn distance(&self, pos1: Vector3<f32>, pos2: Vector3<f32>) -> Vector3<f32> {
+        pos1 - pos2
+    }
+
+    fn add_float_to_pos(&self, pos: &mut Vector3<f32>, rhs: Vector3<f32>) -> bool {
+        *pos += rhs;
+        true
+    }
+}
+
 #[cfg(feature = "simd")]
 pub use simd::*;
 
 #[cfg(feature = "simd")]
 mod simd {
-    use nalgebra::SimdPartialOrd;
+    use nalgebra::{SimdBool, SimdPartialOrd};
 
     use super::*;
-    use crate::simd::{bu32x8, f32x8, u32x8};
+    use crate::simd::{bf32x8, bu32x8, f32x8, u32x8};
+
+    pub trait SimdPosConverter: PosConverter {
+        type SimdBool: SimdBool + Into<bf32x8>;
+        type SimdPosStorage: Scalar
+            + Zero
+            + SimdValue<Element = Self::PosStorage, SimdBool = Self::SimdBool>
+            + SimdPartialOrd
+            + Copy;
+
+        fn pos_to_float_simd(&self, pos: Self::SimdPosStorage) -> f32x8;
+
+        fn float_to_pos_simd(&self, pos: f32x8) -> Self::SimdPosStorage;
+
+        fn pos_to_float_vec_simd(&self, pos: Vector3<Self::SimdPosStorage>) -> Vector3<f32x8>;
+
+        fn float_to_pos_vec_simd(&self, pos: Vector3<f32x8>) -> Vector3<Self::SimdPosStorage>;
+
+        fn distance_simd(
+            &self,
+            pos1: Vector3<Self::SimdPosStorage>,
+            pos2: Vector3<Self::SimdPosStorage>,
+        ) -> Vector3<f32x8>;
+    }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct SimdPosStorage(pub u32x8);
@@ -366,24 +503,27 @@ mod simd {
         }
     }
 
-    impl PosConverter {
-        pub fn pos_to_float_simd(&self, pos: SimdPosStorage) -> f32x8 {
+    impl SimdPosConverter for IntPosConverter {
+        type SimdBool = bu32x8;
+        type SimdPosStorage = SimdPosStorage;
+
+        fn pos_to_float_simd(&self, pos: SimdPosStorage) -> f32x8 {
             pos.to_float(f32x8::splat(self.int_to_float))
         }
 
-        pub fn float_to_pos_simd(&self, pos: f32x8) -> SimdPosStorage {
+        fn float_to_pos_simd(&self, pos: f32x8) -> SimdPosStorage {
             SimdPosStorage::from_float(pos, f32x8::splat(self.int_to_float))
         }
 
-        pub fn pos_to_float_vec_simd(&self, pos: Vector3<SimdPosStorage>) -> Vector3<f32x8> {
+        fn pos_to_float_vec_simd(&self, pos: Vector3<SimdPosStorage>) -> Vector3<f32x8> {
             Vector3::from_iterator((0..3).map(|i| self.pos_to_float_simd(pos[i])))
         }
 
-        pub fn float_to_pos_vec_simd(&self, pos: Vector3<f32x8>) -> Vector3<SimdPosStorage> {
+        fn float_to_pos_vec_simd(&self, pos: Vector3<f32x8>) -> Vector3<SimdPosStorage> {
             Vector3::from_iterator((0..3).map(|i| self.float_to_pos_simd(pos[i])))
         }
 
-        pub fn distance_simd(
+        fn distance_simd(
             &self,
             pos1: Vector3<SimdPosStorage>,
             pos2: Vector3<SimdPosStorage>,
@@ -397,6 +537,31 @@ mod simd {
 
                 delta_float * sign
             }))
+        }
+    }
+
+    impl SimdPosConverter for FloatPosConverter {
+        type SimdBool = bf32x8;
+        type SimdPosStorage = f32x8;
+
+        fn pos_to_float_simd(&self, pos: f32x8) -> f32x8 {
+            pos
+        }
+
+        fn float_to_pos_simd(&self, pos: f32x8) -> f32x8 {
+            pos
+        }
+
+        fn pos_to_float_vec_simd(&self, pos: Vector3<f32x8>) -> Vector3<f32x8> {
+            pos
+        }
+
+        fn float_to_pos_vec_simd(&self, pos: Vector3<f32x8>) -> Vector3<f32x8> {
+            pos
+        }
+
+        fn distance_simd(&self, pos1: Vector3<f32x8>, pos2: Vector3<f32x8>) -> Vector3<f32x8> {
+            pos1 - pos2
         }
     }
 }
@@ -429,7 +594,7 @@ mod tests {
         );
         let pos_float = Vector3::new(box_size / 2., box_size / 4., 3. * (box_size / 8.));
 
-        let conv = PosConverter::new(box_size);
+        let conv = IntPosConverter::new(box_size);
         let pos = conv.pos_to_float_vec(pos_int);
 
         assert_eq!(pos[0], pos_float[0]);
@@ -447,7 +612,7 @@ mod tests {
         );
         let pos_float = Vector3::new(box_size / 2., box_size / 4., 3. * (box_size / 8.));
 
-        let conv = PosConverter::new(box_size);
+        let conv = IntPosConverter::new(box_size);
         let pos = conv.float_to_pos_vec(pos_float);
 
         assert!(pos[1] - pos_int[1] <= PosStorage(10));
@@ -464,7 +629,7 @@ mod tests {
             PosStorage(0),
         );
 
-        let conv = PosConverter::new(box_size);
+        let conv = IntPosConverter::new(box_size);
         let dist = conv.distance(pos2, pos1);
         assert_eq!(dist[0], 100.);
         assert_eq!(dist[1], 50.);

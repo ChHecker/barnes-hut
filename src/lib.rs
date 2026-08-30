@@ -20,14 +20,14 @@ pub enum Sorting {
     EveryNIteration(usize),
 }
 
-pub trait ShortRangeSolver {
+pub trait ShortRangeSolver<C: PosConverter> {
     fn calculate_accelerations(
         &self,
-        particles: &Particles,
+        particles: &Particles<C::PosStorage>,
         accelerations: &mut [Vector3<f32>],
         epsilon: f32,
         sort: bool,
-        conv: &PosConverter,
+        conv: &C,
     ) -> Option<Vec<usize>>;
 }
 
@@ -82,17 +82,21 @@ impl Step {
 /// );
 /// ```
 #[derive(Clone, Debug)]
-pub struct Simulation<S: ShortRangeSolver> {
-    particles: Particles,
-    pub conv: PosConverter,
+pub struct Simulation<C: PosConverter, S: ShortRangeSolver<C>> {
+    particles: Particles<C::PosStorage>,
+    pub conv: C,
     short_range_solver: S,
     sorting: Sorting,
     epsilon: f32,
 }
 
-impl<S: ShortRangeSolver> Simulation<S> {
-    pub fn new(particles: Particles, short_range_solver: S, epsilon: f32, box_size: f32) -> Self {
-        let conv = PosConverter::new(box_size);
+impl<C: PosConverter, S: ShortRangeSolver<C>> Simulation<C, S> {
+    pub fn new(
+        particles: Particles<C::PosStorage>,
+        short_range_solver: S,
+        conv: C,
+        epsilon: f32,
+    ) -> Self {
         Self {
             particles,
             conv,
@@ -123,7 +127,7 @@ impl<S: ShortRangeSolver> Simulation<S> {
     }
 
     /// Get an immutable reference to the particles' positions.
-    pub fn positions(&self) -> impl Iterator<Item = &Vector3<PosStorage>> {
+    pub fn positions(&self) -> impl Iterator<Item = &Vector3<C::PosStorage>> {
         self.particles.positions.iter()
     }
 
@@ -200,13 +204,17 @@ impl<S: ShortRangeSolver> Simulation<S> {
     /// # Arguments
     /// - `time_step`: Size of each time step.
     /// - `num_steps`: How many time steps to take.
-    pub fn simulate(&mut self, time_step: f32, num_steps: usize) -> DMatrix<Vector3<PosStorage>> {
+    pub fn simulate(
+        &mut self,
+        time_step: f32,
+        num_steps: usize,
+    ) -> DMatrix<Vector3<C::PosStorage>> {
         assert!(time_step > 0.);
         assert!(num_steps > 0);
 
         let n = self.particles.len();
 
-        let mut positions: DMatrix<Vector3<PosStorage>> = DMatrix::zeros(num_steps + 1, n);
+        let mut positions: DMatrix<Vector3<C::PosStorage>> = DMatrix::zeros(num_steps + 1, n);
         for (i, pos) in positions.row_mut(0).iter_mut().enumerate() {
             *pos = self.particles.positions[i];
         }
@@ -235,15 +243,17 @@ impl<S: ShortRangeSolver> Simulation<S> {
 #[cfg(test)]
 pub(crate) use tests::generate_random_particles;
 
-use crate::particles::{PosConverter, PosStorage};
+use crate::particles::PosConverter;
 
 #[cfg(test)]
 mod tests {
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
+    use crate::particles::PosStorage;
+
     use super::*;
 
-    pub(crate) fn generate_random_particles(n: usize) -> Particles {
+    pub(crate) fn generate_random_particles(n: usize) -> Particles<PosStorage> {
         let mut rng = StdRng::seed_from_u64(0);
 
         (0..n)

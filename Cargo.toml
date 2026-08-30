@@ -19,7 +19,7 @@ nalgebra = "0.34.1"
 num-traits = "0.2.19"
 rand = { version = "0.9.2", optional = true }
 rand_distr = { version = "0.5.1", optional = true }
-rayon = { version = "1.11.0", optional = true }
+rayon = { version = "1.11.0" }
 simba = { version = "0.9.1", optional = true }
 wide = { version = "1.0.2", optional = true }
 
@@ -28,7 +28,6 @@ criterion = "0.8.0"
 nalgebra = { version = "0.34.1", features = ["rand"] }
 barnes_hut = { path = ".", features = [
     "randomization",
-    "rayon",
     "simd",
     "visualization",
 ] }
@@ -53,5 +52,5 @@ required-features = ["randomization", "visualization"]
 
 [[bench]]
 name = "benchmark"
-required-features = ["randomization", "rayon", "simd"]
+required-features = ["randomization", "simd"]
 harness = false

@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::particles::PosConverter;
 use crate::{ShortRangeSolver, Simulation, Step, particles::ParticleCreator};
 #[cfg(feature = "simd")]
 use blue_engine::{Engine, primitive_shapes::uv_sphere};
@@ -7,19 +8,19 @@ use blue_engine::{EngineSettings, ObjectSettings};
 use nalgebra::Vector3;
 
 /// Visualize the Barnes-Hut algorithm.
-pub struct Visualizer<S: ShortRangeSolver> {
+pub struct Visualizer<C: PosConverter, S: ShortRangeSolver<C>> {
     engine: Engine,
-    simulator: Simulation<S>,
+    simulator: Simulation<C, S>,
 }
 
-impl<S: 'static + ShortRangeSolver> Visualizer<S> {
+impl<C: 'static + PosConverter, S: 'static + ShortRangeSolver<C>> Visualizer<C, S> {
     /// Create a new visualizer.
     ///
     /// # Arguments
     /// - `simulator`: A [`Simulation`] struct.
     /// - `width`: Width of the window.
     /// - `height`: Height of the window.
-    pub fn new(simulator: Simulation<S>, width: u32, height: u32) -> color_eyre::Result<Self> {
+    pub fn new(simulator: Simulation<C, S>, width: u32, height: u32) -> color_eyre::Result<Self> {
         let mut engine = Engine::new_config(EngineSettings {
             width,
             height,
@@ -90,17 +91,18 @@ impl<S: 'static + ShortRangeSolver> Visualizer<S> {
     }
 }
 
-impl<S: 'static + ShortRangeSolver> Visualizer<S> {
-    pub fn from_particle_creator<Pc: ParticleCreator>(
+impl<C: 'static + PosConverter, S: 'static + ShortRangeSolver<C>> Visualizer<C, S> {
+    pub fn from_particle_creator<Pc: ParticleCreator<C::PosStorage>>(
         mut particle_creator: Pc,
         short_range_solver: S,
         num_particles: u32,
         epsilon: f32,
         width: u32,
         height: u32,
+        conv: C,
     ) -> color_eyre::Result<Self> {
         let particles = particle_creator.create_particles(num_particles);
-        let sim = Simulation::new(particles, short_range_solver, epsilon, 1.);
+        let sim = Simulation::new(particles, short_range_solver, conv, epsilon);
 
         Self::new(sim, width, height)
     }
